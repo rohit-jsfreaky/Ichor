@@ -21,6 +21,8 @@ import { GraphClient, configFromEnv } from '../graph/client.js';
 import { loadTask, toNeighborhood, markJustified, type PersistedTask } from '../state.js';
 import { classify } from '../scope/classify.js';
 import { parsePending } from '../scope/pending.js';
+import { askJudge, formatOpinion } from '../judge/judge.js';
+import { checkBudget, recordJudgeCall } from '../judge/budget.js';
 
 const PROTOCOL_VERSION = '2025-06-18';
 
@@ -307,6 +309,7 @@ async function callTool(
         { client: getGraph(), neighborhood: toNeighborhood(task) },
       );
 
+      // GRAPH FIRST. If the structure already supports it, no model is needed.
       if (verdict.decision === 'EXPECTED' || verdict.decision === 'CONNECTED') {
         markJustified(repoRoot, file, reason);
         return [
@@ -315,15 +318,58 @@ async function callTool(
         ].join('\n');
       }
 
+      // LLM SECOND, and only here — this is the one place the agent has actually
+      // made an argument, so it is the only place an argument can be weighed.
+      // The hook deliberately does not call the Judge: it must stay fast, and
+      // pre-edit there is no argument to weigh yet.
+      const budget = checkBudget(repoRoot, file);
+      const neighborhood = toNeighborhood(task);
+
+      if (budget.allowed) {
+        const opinion = await askJudge({ neighborhood, verdict, file, agentReason: reason });
+        if (opinion) {
+          recordJudgeCall(repoRoot, file);
+
+          if (opinion.decision === 'SUPPORTED_EXPANSION' || opinion.decision === 'EXPECTED') {
+            markJustified(repoRoot, file, reason);
+            return [
+              `Granted. ${file} is now part of the task boundary.`,
+              '',
+              formatOpinion(opinion),
+            ].join('\n');
+          }
+
+          if (opinion.decision === 'HUMAN_DECISION') {
+            return [
+              `This is the developer's call, not Ichor's.`,
+              '',
+              formatOpinion(opinion),
+              '',
+              'Ask the developer before expanding the task, or take the smaller change that stays on',
+              'the existing path.',
+            ].join('\n');
+          }
+
+          return [`Not granted. ${verdict.reason}`, '', formatOpinion(opinion)].join('\n');
+        }
+      }
+
+      // No Judge — no key, unreachable, or out of budget. The graph verdict
+      // stands on its own; Ichor never becomes more permissive just because a
+      // model was unavailable.
       return [
         `Not granted automatically. ${verdict.reason}`,
         '',
         `Your reason: "${reason}"`,
         '',
-        'Ichor could not find structure in the codebase supporting that, so this is a decision for',
-        'the developer rather than for Ichor. Ask them directly, or take the smaller change that',
-        'stays on the existing path.',
-      ].join('\n');
+        budget.allowed
+          ? 'Ichor could not find structure in the codebase supporting that.'
+          : budget.reason ?? '',
+        'This is a decision for the developer rather than for Ichor. Ask them directly, or take the',
+        'smaller change that stays on the existing path.',
+      ]
+        .filter(Boolean)
+        .join('\n');
     }
 
     default:

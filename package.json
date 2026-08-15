@@ -1,0 +1,40 @@
+{
+  "name": "ichor",
+  "version": "0.1.0",
+  "description": "Every path from your endpoints to your data. Reachability analysis for TypeScript codebases, on HydraDB.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "ichor": "./dist/src/cli.js"
+  },
+  "scripts": {
+    "smoke": "tsx scripts/smoke.ts",
+    "spike": "tsx scripts/spike-tsmorph.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "up": "docker compose up -d",
+    "down": "docker compose down",
+    "logs": "docker compose logs -f hydradb",
+    "analyze": "tsx scripts/analyze.ts",
+    "ingest": "tsx scripts/ingest.ts",
+    "scope": "tsx scripts/scope.ts",
+    "check": "tsx scripts/check.ts",
+    "hook:test": "tsx scripts/hook-test.ts"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "neo4j-driver": "^5.28.1",
+    "ts-morph": "^24.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

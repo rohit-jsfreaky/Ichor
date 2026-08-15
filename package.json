@@ -24,7 +24,8 @@
     "ingest": "tsx scripts/ingest.ts",
     "scope": "tsx scripts/scope.ts",
     "check": "tsx scripts/check.ts",
-    "hook:test": "tsx scripts/hook-test.ts"
+    "hook:test": "tsx scripts/hook-test.ts",
+    "mcp:test": "node dist/scripts/mcp-test.js"
   },
   "dependencies": {
     "commander": "^12.1.0",

@@ -13,7 +13,7 @@
  * enforced.
  *
  * Silence is the default. When uncertain we stay quiet: a tool that questions
- * every third edit is uninstalled the same afternoon (PROJECT_FINAL.md §32).
+ * every third edit is uninstalled the same afternoon.
  */
 
 import type { GraphClient } from '../graph/client.js';

@@ -71,7 +71,7 @@ export interface BuildOptions {
    * 3 is deliberate. Deeper pulls in half the codebase through shared utilities
    * — a helper called by everything becomes a bridge to everything — and a
    * neighbourhood that contains everything challenges nothing. Precision over
-   * recall (PROJECT_FINAL.md §32).
+   * recall.
    */
   maxDepth?: number;
   onProgress?: (message: string) => void;

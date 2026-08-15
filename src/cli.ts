@@ -154,6 +154,15 @@ program
     await runHook();
   });
 
+program
+  .command('mcp', { hidden: true })
+  .description('internal: MCP server over stdio, so the agent can ask why and argue back')
+  .option('--repo <path>', 'repository root', process.cwd())
+  .action(async (options: { repo: string }) => {
+    const { runMcpServer } = await import('./mcp/server.js');
+    await runMcpServer(path.resolve(options.repo));
+  });
+
 program.parseAsync(process.argv).catch((error: Error) => {
   console.error(error.message);
   process.exit(1);

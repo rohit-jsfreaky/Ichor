@@ -7,7 +7,7 @@
  *
  * DELIBERATELY DETERMINISTIC. No LLM here, for two reasons:
  *
- *  1. Ichor must work with no API key at all (SCOPE.md). Anchoring is the first
+ *  1. Ichor must work with no API key at all. Anchoring is the first
  *     step, so if it needed a key, nothing would work without one.
  *  2. It is testable. An LLM anchor step cannot be asserted against a fixture.
  *

@@ -29,7 +29,35 @@ export function installHooks(repoRoot: string): InstallResult {
   const messages: string[] = [];
   const claudeCode = installClaudeCode(repoRoot, messages);
   const codex = installCodex(repoRoot, messages);
+  installMcp(repoRoot, messages);
   return { messages, claudeCode, codex };
+}
+
+/**
+ * Register the MCP server so the agent can ask why and argue back.
+ *
+ * Both hosts read `.mcp.json` at the repo root, so one file covers both. This is
+ * the collaboration layer, not the enforcement layer — an agent can decline to
+ * call a tool, which is exactly why the hook exists as well.
+ */
+function installMcp(repoRoot: string, messages: string[]): void {
+  const file = path.join(repoRoot, '.mcp.json');
+  const config = readJson(file);
+  const servers = (config.mcpServers ?? {}) as Record<string, unknown>;
+
+  if (servers.ichor) {
+    messages.push('  MCP server: already registered');
+    return;
+  }
+
+  servers.ichor = {
+    type: 'stdio',
+    command: 'npx',
+    args: ['ichor', 'mcp', '--repo', '.'],
+  };
+
+  writeJson(file, { ...config, mcpServers: servers });
+  messages.push(`  MCP server: registered -> ${path.relative(repoRoot, file)}`);
 }
 
 function readJson(file: string): Record<string, unknown> {

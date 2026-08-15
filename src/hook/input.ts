@@ -1,10 +1,9 @@
 /**
  * Turn a host-specific PreToolUse payload into Ichor's common event.
  *
- * This is the whole adapter layer (PROJECT_FINAL.md §38, §45). The scope engine
- * must never learn that Claude Code and Codex describe an edit differently, so
- * all host knowledge is confined to this file. A new agent is a new branch here
- * and nothing else.
+ * This is the whole adapter layer. The scope engine must never learn that Claude
+ * Code and Codex describe an edit differently, so all host knowledge is confined
+ * to this file: a new agent is a new branch here and nothing else.
  *
  * The two we support today:
  *

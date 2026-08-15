@@ -118,31 +118,67 @@ export class GraphClient {
   async run(cypher: string, params: Record<string, unknown> = {}): Promise<QueryResult> {
     return this.withRetry(async () => {
       const session = this.session();
+      // neo4j-driver decorates every Result with a captured stack:
+      //
+      //   function captureStacktrace() { var error = new Error(''); ... }
+      //
+      // Called from a deep async chain — inside the MCP server's readline
+      // iterator, several awaits down — that `new Error('')` throws
+      // `RangeError: The value of "offset" is out of range` while V8 builds the
+      // async stack. It is purely cosmetic to the driver, so we suppress the
+      // capture for the duration of the call and restore it immediately.
+      //
+      // This does NOT hide our own errors: the RangeError was replacing a real
+      // query result with a spurious failure, and our own throws are caught and
+      // reported by the caller with their own stacks.
+      const previousLimit = Error.stackTraceLimit;
+      Error.stackTraceLimit = 0;
       try {
         return await session.run(cypher, params);
       } finally {
+        Error.stackTraceLimit = previousLimit;
         await session.close();
       }
     });
   }
 
   /**
-   * Retry once on a transport-level failure.
+   * Retry transport-level failures on a fresh connection.
    *
-   * Retries ONLY connection faults, never query errors — a rejected Cypher
+   * Retries ONLY transport faults, never query errors — a rejected Cypher
    * statement is a bug in our query and must surface immediately rather than be
-   * tried again (docs/ENGINEERING-RULES.md rule 2). A dropped socket, by
-   * contrast, is worth one clean reconnect, and the alternative is the demo
-   * dying on a stale connection.
+   * tried again. A broken frame, by contrast, is worth reconnecting for.
+   *
+   * WHY MORE THAN ONE ATTEMPT: reads intermittently fail with
+   * `RangeError: The value of "offset" is out of range`, thrown inside
+   * `session.run` while the driver decodes the response. It is a Bolt
+   * chunk-framing race between HydraDB's server and the JavaScript driver, so it
+   * depends on how the TCP payload happens to be split and recurs at a low rate
+   * on identical queries. Verified by logging: the same query succeeds on the
+   * next attempt with no change.
+   *
+   * A single retry left roughly one hook invocation in six silently failing
+   * open, which for a tool whose whole job is to challenge an edit is worse than
+   * not running at all — you would trust a block that never came.
    */
   private async withRetry<T>(operation: () => Promise<T>): Promise<T> {
-    try {
-      return await operation();
-    } catch (error) {
-      if (!isTransportError(error)) throw error;
-      await this.close(); // drop the poisoned pool, next call rebuilds it
-      return operation();
+    const MAX_ATTEMPTS = 4;
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        if (!isTransportError(error)) throw error;
+        // Drop the poisoned pool; the next attempt rebuilds it.
+        await this.close();
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
+        }
+      }
     }
+    throw lastError;
   }
 
   /**

@@ -166,6 +166,11 @@ async function main() {
     console.log(`${ok ? '✓' : '✗'} ${testCase.label}`);
     console.log(`    ${blocked ? 'BLOCKED' : 'allowed'}${testCase.expectBlocked !== blocked ? `  (expected ${testCase.expectBlocked ? 'BLOCKED' : 'allowed'})` : ''}`);
 
+    if (!ok) {
+      console.log(`    exit=${code}  stdout bytes=${stdout.length}`);
+      console.log(`    raw: ${JSON.stringify(stdout.slice(0, 300))}`);
+    }
+
     if (blocked) {
       const parsed = JSON.parse(stdout) as {
         hookSpecificOutput: { permissionDecisionReason: string };

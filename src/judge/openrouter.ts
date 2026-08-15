@@ -95,7 +95,7 @@ export async function complete(
           // finish_reason "length" — which looks exactly like an outage.
           // Observed with deepseek-v4-flash, which burned an entire 50-token
           // budget on chain-of-thought and never wrote a verdict.
-          max_tokens: 2000,
+          max_tokens: 4000,
           response_format: { type: 'json_object' },
         }),
       });

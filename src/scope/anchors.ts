@@ -69,12 +69,30 @@ export function taskTerms(task: string): string[] {
   return [...terms];
 }
 
-/** Singular/plural tolerance without pulling in a stemmer. */
-function matches(term: string, candidate: string): boolean {
+/**
+ * Singular/plural tolerance without pulling in a stemmer.
+ *
+ * Exported because task-switch detection must match a new prompt against the
+ * codebase using EXACTLY the rule that drew the boundary in the first place.
+ * Two near-identical matchers would drift apart and produce a boundary that
+ * disagrees with the detector that maintains it (ENGINEERING-RULES rule 3).
+ */
+export function matches(term: string, candidate: string): boolean {
   const c = candidate.toLowerCase();
   if (c.includes(term)) return true;
   if (term.endsWith('s') && c.includes(term.slice(0, -1))) return true;
   if (!term.endsWith('s') && c.includes(`${term}s`)) return true;
+
+  // Verb forms of a noun the codebase names directly: "invoicing" must reach
+  // `Invoice`, or "add invoicing for vendors" reads as more vendor work and the
+  // boundary never moves. The 4-character floor on the stem is what stops this
+  // becoming a wildcard — "string" would otherwise stem to "str" and match half
+  // the repo.
+  for (const suffix of ['ing', 'ed']) {
+    if (!term.endsWith(suffix)) continue;
+    const stem = term.slice(0, -suffix.length);
+    if (stem.length >= 4 && c.includes(stem)) return true;
+  }
   return false;
 }
 

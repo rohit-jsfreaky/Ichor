@@ -4,23 +4,25 @@
  *
  *   ichor init                install hooks for Claude Code and Codex
  *   ichor up                  start the local HydraDB stack
- *   ichor start "<task>"      analyse, build the neighbourhood, begin watching
+ *   ichor watch               follow the conversation; the task comes from your prompts
+ *   ichor start "<task>"      name the task by hand instead
  *   ichor status              what is currently in scope
  *   ichor stop                end the task, stop policing
  *   ichor down                stop the stack
- *   ichor hook                internal — invoked by the agents' PreToolUse hook
+ *   ichor hook                internal — the agents' hook handler
+ *   ichor refresh             internal — the background rebuild between turns
  */
 
 import { Command } from 'commander';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import { analyzeRepo } from './extract/analyze.js';
-import { writeGraph } from './graph/write.js';
 import { GraphClient, configFromEnv } from './graph/client.js';
 import { findAnchors } from './scope/anchors.js';
 import { buildNeighborhood } from './scope/neighborhood.js';
-import { saveTask, loadTask, clearTask, stateDir } from './state.js';
+import { saveTask, loadTask, clearTask, stateDir, writeAtomic } from './state.js';
+import { analyzeAndPersist, refresh } from './refresh/refresh.js';
+import { watchPath, isWatching } from './hook/prompt.js';
 import { runHook } from './hook/run.js';
 import { installHooks } from './hook/install.js';
 import { up, down, isRunning } from './stack/stack.js';
@@ -52,8 +54,55 @@ program
       }
     }
 
-    console.log('\nNext: ichor up   (starts HydraDB)');
-    console.log('Then: ichor start "your task"\n');
+    console.log('\nNext: ichor up      (starts HydraDB)');
+    console.log('Then: ichor watch   (Ichor takes the task from your prompts)\n');
+  });
+
+program
+  .command('watch')
+  .description('follow the conversation — the boundary is set from what you ask the agent')
+  .option('--repo <path>', 'repository root', process.cwd())
+  .action(async (options: { repo: string }) => {
+    const repoRoot = path.resolve(options.repo);
+
+    if (!(await isRunning())) {
+      console.error('\nHydraDB is not answering on the Bolt port.');
+      console.error('Start it with: ichor up\n');
+      process.exitCode = 1;
+      return;
+    }
+
+    const client = new GraphClient(configFromEnv());
+    try {
+      process.stdout.write('\n  reading the codebase… ');
+      const facts = await analyzeAndPersist(repoRoot, client);
+      console.log(
+        `${facts.functions.length} functions, ${facts.calls.length} calls, ${facts.routes.length} routes`,
+      );
+
+      // No task yet, on purpose. The first thing you ask the agent decides what
+      // this task is; guessing one now would just be a boundary nobody chose.
+      clearTask(repoRoot);
+      writeAtomic(
+        watchPath(repoRoot),
+        `${JSON.stringify({ version: 1, startedAt: new Date().toISOString(), repoRoot }, null, 2)}\n`,
+      );
+
+      console.log('\nWatching. Run your agent as usual — Ichor picks the task up from your prompts.');
+      console.log('Check what it decided any time with: ichor status\n');
+    } finally {
+      await client.close();
+    }
+  });
+
+program
+  .command('refresh', { hidden: true })
+  .description('internal: rebuild the graph in the background after a turn')
+  .option('--repo <path>', 'repository root', process.cwd())
+  .option('--force', 'rebuild even if nothing looks stale', false)
+  .action(async (options: { repo: string; force: boolean }) => {
+    const result = await refresh(path.resolve(options.repo), { force: options.force });
+    if (process.env.ICHOR_DEBUG === '1') console.error(`[ichor refresh] ${result.why}`);
   });
 
 program
@@ -97,17 +146,15 @@ program
 
     console.log(`\ntask: "${task}"\n`);
 
-    process.stdout.write('  reading the codebase… ');
-    const facts = analyzeRepo(repoRoot);
-    console.log(
-      `${facts.functions.length} functions, ${facts.calls.length} calls, ${facts.routes.length} routes`,
-    );
-
     const client = new GraphClient(configFromEnv());
     try {
-      process.stdout.write('  building the graph… ');
-      const written = await writeGraph(client, facts);
-      console.log(`${written.nodesWritten} nodes, ${written.edgesWritten} edges`);
+      process.stdout.write('  reading the codebase… ');
+      // Same path as `watch`: it also caches the facts and the name index, so an
+      // explicitly-started task still notices when you move on to another job.
+      const facts = await analyzeAndPersist(repoRoot, client);
+      console.log(
+        `${facts.functions.length} functions, ${facts.calls.length} calls, ${facts.routes.length} routes`,
+      );
 
       process.stdout.write('  finding the task area… ');
       const { anchors, terms } = findAnchors(facts, task);
@@ -116,7 +163,10 @@ program
       });
       console.log(`${neighborhood.stats.memberCount} functions`);
 
-      saveTask(repoRoot, neighborhood);
+      // Explicit beats inferred: naming a task by hand also stops prompt-driven
+      // detection from redrawing it out from under you.
+      saveTask(repoRoot, neighborhood, { mode: 'explicit' });
+      if (fs.existsSync(watchPath(repoRoot))) fs.rmSync(watchPath(repoRoot));
 
       console.log('\nIn scope:');
       const sorted = [...neighborhood.members.values()].sort((a, b) => a.distance - b.distance);
@@ -150,14 +200,20 @@ program
     const task = loadTask(repoRoot);
 
     if (!task) {
-      console.log('\nNo active task. Start one with: ichor start "your task"\n');
+      if (isWatching(repoRoot)) {
+        console.log('\nWatching this repo. No task yet — it is set by what you ask the agent next.\n');
+        return;
+      }
+      console.log('\nNo active task. Start one with: ichor watch, or: ichor start "your task"\n');
       return;
     }
 
     console.log(`\ntask:    "${task.task}"`);
+    console.log(`set by:  ${task.mode === 'watch' ? 'your prompt' : 'ichor start'}`);
     console.log(`started: ${task.startedAt}`);
     console.log(`scope:   ${task.members.length} functions`);
     if (task.coreModels.length) console.log(`data:    ${task.coreModels.join(', ')}`);
+    if (task.graphBuiltAt) console.log(`graph:   built ${task.graphBuiltAt}`);
 
     if (task.challenged.length) {
       console.log(`\nchallenged (${task.challenged.length}):`);
@@ -166,6 +222,13 @@ program
     if (task.justified.length) {
       console.log(`\nexpanded into (${task.justified.length}):`);
       for (const j of task.justified) console.log(`  ✓ ${j.file} — ${j.reason}`);
+    }
+    if (task.forced.length) {
+      // Shown separately from `challenged` because the distinction matters: the
+      // agent answered these by writing them again rather than by explaining.
+      console.log(`\nchallenged, then written anyway (${task.forced.length}):`);
+      for (const f of task.forced) console.log(`  ⚠ ${f.file}`);
+      console.log('  never justified — Ichor will not cite these as existing paths');
     }
     console.log('');
   });
@@ -177,7 +240,8 @@ program
   .action((options: { repo: string }) => {
     const repoRoot = path.resolve(options.repo);
     clearTask(repoRoot);
-    console.log(`\nTask closed. ${stateDir(repoRoot)} cleared.\n`);
+    if (fs.existsSync(watchPath(repoRoot))) fs.rmSync(watchPath(repoRoot));
+    console.log(`\nTask closed, and no longer watching. Re-arm with: ichor watch\n`);
   });
 
 program

@@ -83,16 +83,29 @@ Ichor is not a file fence. Edits are classified as:
 npm i -g ichor-cli
 
 cd your-repo
-ichor init                                   # installs hooks + MCP, writes the HydraDB stack
-ichor up                                     # starts HydraDB and MinIO locally
-ichor start "fix duplicate email handling"   # works out the task neighbourhood
+ichor init     # installs hooks + MCP, writes the HydraDB stack
+ichor up       # starts HydraDB and MinIO locally
+ichor watch    # reads the codebase and starts following the conversation
 ```
 
-Then run Claude Code or Codex exactly as you normally would.
+Then run Claude Code or Codex exactly as you normally would. **There is no task to type.** Ichor takes it from what you ask the agent:
+
+```
+> fix the duplicate email crash in vendor onboarding
+  [ichor] task set — 14 functions, data: Vendor
+
+  …hours later, same conversation…
+
+> now fix the rounding on billing invoices
+  [ichor] new task — 3 functions, data: Invoice
+```
+
+That matters more than it looks. Nobody runs a CLI command between tasks, so a boundary you set at 9am is still policing vendor code at 2pm while you are deep in billing — challenging every edit until you turn the thing off.
 
 ```bash
-ichor status      # what is currently in scope, what was challenged, what grew
-ichor stop        # end the task
+ichor status      # what is in scope, what was challenged, what was forced through
+ichor start "…"   # name the task by hand instead; detection then reports but never redraws
+ichor stop        # stop watching
 ichor down        # stop the database   (--wipe also deletes the graph)
 ```
 
@@ -176,6 +189,12 @@ Both agents also get an **MCP server**, so the agent can ask why something was f
 | `ichor_check_change` | classify a file before writing it |
 | `ichor_explain` | why this verdict, with the paths behind it |
 | `ichor_request_scope_expansion` | argue for the boundary to grow |
+| `ichor_callers` | who reaches this function, and from which endpoints |
+| `ichor_paths` | how the app reaches a table, and through what |
+
+The last two are not about policing at all — they exist because the graph is genuinely useful to the agent. In a real Codex run, before writing a single line it searched the repo for five words, got 116 hits, and read six entire files, to work out which code the task lived in. Ichor had already answered that in 14ms and could simply have been asked.
+
+Both report truncation rather than quietly returning the first N (rule 2), and `ichor_paths` says plainly that it returns path summaries — entry point, handler, the function that touches the data — because `algo.SPpaths` is rejected over Bolt on this build.
 
 ## The Judge (optional)
 
@@ -185,14 +204,22 @@ A model is asked exactly one question: when an agent **argues** that an expansio
 
 **Ichor is fully functional with no key at all.** No key simply means no expansion is ever granted on an argument alone — everything unverifiable goes to you instead.
 
-The recommended model is `openai/gpt-5-mini`, chosen by measurement rather than reputation. `npm run judge:test` pressure-tests the Judge with an agent arguing for an endpoint the codebase already makes unnecessary, including an authoritative *"OWASP mandates this"* framing:
+`npm run judge:test` measures it on three cases, three runs each. Two are an agent arguing for an endpoint the codebase already makes unnecessary — including an authoritative *"OWASP mandates this"* framing — where the Judge must refuse. The third is a claim about **user behaviour**, which a call graph structurally cannot see, where it must ask the developer rather than assert:
 
-| Model | Result |
-|---|---|
-| `openai/gpt-5-mini` | **3/3** — refuses the pressure, escalates what it cannot verify |
-| `deepseek/deepseek-v4-flash` | 2/3 — refuses everything, including a claim it merely lacks evidence for |
+| Model | 3 runs | Price (out) |
+|---|---|---|
+| `openai/gpt-5-mini` — primary | **8/9** | $2.00/M |
+| `deepseek/deepseek-v4-flash` — fallback | **8/9** | $0.13/M |
+| `openai/gpt-oss-120b` | 7/9 — one run collapsed to 1/3 | $0.17/M |
+| `qwen/qwen3.7-flash` | 6/9 — over-refuses every time | $0.13/M |
 
-Both resisted the authoritative argument, which is the behaviour that matters most. The Judge is also capped at 25 calls per task and 2 per file, and only runs when an agent actually argues — a whole hackathon costs pennies.
+Every model resisted the authoritative argument, which is the behaviour that matters most. Nothing beat the fallback on this suite, which is the property you want from one — dropping to it costs nothing measurable.
+
+All the remaining variance is the third case: whether a model **escalates** a claim it cannot check, or refuses it outright. Refusing everything looks careful and is useless, so that case exists to catch it.
+
+> Worth stating plainly: an earlier version of that third case claimed a five-step wizard, and the demo has a single `<form onSubmit>`. The premise was contradicted by the fixture, so refusing it was *correct*, and every model "failed" a case by being right. The published 3/3 vs 2/3 comparison came from that broken case. It is fixed, and the numbers above are the re-measured ones.
+
+The Judge is capped at 25 calls per task and 2 per file, and only runs when an agent actually argues — a whole hackathon costs pennies.
 
 ## Your code never leaves your machine
 
@@ -231,6 +258,9 @@ Things found the hard way while building on it, offered back:
 - **Ids must be sent as Bolt integers.** A plain JS number encodes as FLOAT and is rejected with *"field vertex must be a non-negative integer"*; every id goes through a `gInt()` wrapper.
 - **Bolt chunk framing occasionally races the JS driver**, surfacing as `RangeError: offset is out of range` thrown from inside `session.run`. It hit roughly 1 in 6 hook invocations before [`src/graph/client.ts`](src/graph/client.ts) grew a 4-attempt reconnect. Worth a look — it is a driver-visible framing issue, not a query problem.
 - **`LIMIT` truncates silently**, so any query whose *ranking* matters has to over-fetch and rank client-side.
+- **A variable-length segment cannot start from an unbound node** — *"variable-length MATCH requires a fixed source id"*. `MATCH (c:Function)-[:CALLS*1..4]->(t:Function) WHERE t.name = $name` is rejected, because the node being pinned is the target. Anything traversing *backwards* from a known node has to pin an id and widen one hop at a time.
+- **`algo.SPpaths` is unavailable over Bolt** on this build — *"query transport cannot authorize an unsupported Cypher clause"* — so whole paths with every intermediate hop cannot be fetched, only summaries assembled from bounded traversal.
+- **Relationship properties need an explicit id.** `CREATE (a)-[:R {x: row.x}]->(b)` is rejected with *"UNWIND relationship CREATE properties require id: row.&lt;field&gt;"*; the edge needs its own id column before it will accept any property.
 
 The Cypher subset was never a problem in practice. Depth is close to free — the neighbourhood walk is the cheapest part of the whole pipeline.
 
@@ -240,7 +270,9 @@ The Cypher subset was never a problem in practice. Depth is close to free — th
 - **Static analysis.** Dynamic dispatch and runtime-constructed calls are invisible, so results are a floor and never a ceiling.
 - **Shell writes are unseen.** Ichor hooks the agents' edit tools; a file written by `cat >` or a codegen script bypasses it entirely.
 - **The initial boundary is an expectation, not a fact.** It is designed to grow when the work justifies it.
-- **The graph is a snapshot.** It is built at `ichor start` and not updated as the agent edits, so a function created during the task is judged by what it reaches, not by what later calls it.
+- **The graph is rebuilt between turns, not during them.** While the agent works, new code it writes is tracked as a weaker, name-based hint — good enough to see that a new file connects to something it just created, never good enough to be quoted as evidence. The compiled graph is rebuilt when the agent stops talking. So within a single turn the graph can be a few edits behind.
+- **Task detection can be wrong.** It moves the boundary only when a prompt points somewhere the boundary does not cover, and anything ambiguous — "continue", a pasted stack trace, a question — changes nothing. `ichor status` always shows what it decided, and `ichor start` overrides it.
+- **One conversation at a time per repo.** Task state is per-repo, so two agent sessions in the same checkout share one boundary; the newer session takes it over. Per-session isolation is not built.
 - **One repo at a time.** `ichor start` wipes the graph and rebuilds it, so a single local HydraDB holds one codebase at a time. Starting a task in a second repo replaces the first — go back and you simply run `ichor start` again.
 - **Ichor can be wrong.** When it cannot validate a justification it asks you, rather than deciding for you.
 

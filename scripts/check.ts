@@ -158,8 +158,53 @@ async function main() {
       console.log('');
     }
 
-    console.log(`${passed}/${SCENARIOS.length} scenarios behaved as expected\n`);
-    if (passed !== SCENARIOS.length) process.exitCode = 1;
+    // ---- the developer moves on to a different job ------------------------
+    //
+    // The failure this guards against is the one that makes Ichor useless in
+    // real life: people work all day in one conversation, and a boundary drawn
+    // for the morning's task challenges every edit of the afternoon's. Under the
+    // new boundary the SAME billing file that was SUSPICIOUS above must be
+    // EXPECTED, and the vendor code that was in scope must no longer be.
+    const SWITCHED = 'fix the billing invoice rounding';
+    console.log(`── the developer switches job: "${SWITCHED}" ──\n`);
+
+    const switched = await buildNeighborhood(
+      client,
+      SWITCHED,
+      findAnchors(facts, SWITCHED).anchors,
+      findAnchors(facts, SWITCHED).terms,
+    );
+    console.log(
+      `neighbourhood: ${switched.stats.memberCount} functions, ` +
+        `models: ${[...switched.models.values()].map((m) => m.name).join(', ')}\n`,
+    );
+
+    const AFTER: Scenario[] = [
+      {
+        label: 'billing is now the job, not an intrusion',
+        intent: { operation: 'edit', file: 'src/lib/billing/invoice.ts' },
+        expect: 'EXPECTED',
+      },
+      {
+        label: '⚠ yesterday\'s vendor work is now out of scope',
+        intent: { operation: 'edit', file: 'src/lib/vendors/create.ts' },
+        expect: 'SUSPICIOUS',
+      },
+    ];
+
+    let switchedPassed = 0;
+    for (const scenario of AFTER) {
+      console.log(`${scenario.label}`);
+      const verdict = await classify(scenario.intent, { client, neighborhood: switched });
+      if (show(verdict, scenario.expect)) switchedPassed++;
+      else console.log(`        expected ${scenario.expect}`);
+      console.log('');
+    }
+
+    const total = SCENARIOS.length + AFTER.length;
+    passed += switchedPassed;
+    console.log(`${passed}/${total} scenarios behaved as expected\n`);
+    if (passed !== total) process.exitCode = 1;
   } finally {
     await client.close();
   }

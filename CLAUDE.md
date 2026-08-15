@@ -41,7 +41,13 @@ Test 2 is what catches the demo case. `/api/vendors/check-email` **passes** test
 
 - **Symbol-level, not file-level.** One file can hold forty functions with one in the task.
 - **New files are classified by what they reach**, not by being new. The hook carries the pending content — parse it, resolve its imports and calls against the graph.
-- **The graph stays fresh for free** — reuse the parse the hook already did.
+- **The hook's parse is a HINT, never a graph edge.** It resolves by name, not through the
+  type checker, so it may corroborate connectivity but must never be written into the graph or
+  quoted as evidence (rule 1). Freshness comes from rebuilding between turns instead: `Stop`
+  spawns a detached rebuild, because analysis costs ~1.6s on the demo and ~2.8s here.
+- **The task boundary goes stale faster than the graph.** People work all day in one
+  conversation, so `UserPromptSubmit` re-reads the boundary from each prompt and redraws it
+  when the job changes. Ambiguity always resolves to "change nothing".
 - **One hook script serves both agents.** Claude Code and Codex accept the identical `PreToolUse` JSON; only the config path differs.
 
 ## Hard constraints you will otherwise trip over
@@ -89,6 +95,9 @@ npm test
 
 ## Current state
 
-**Day 1.** Foundations only — docker stack, `ids.ts` (tested), graph client, smoke script. The analyzer, scope engine, hooks and MCP server are not written yet.
+**Feature-complete, verified live on both agents.** Analyzer, graph, scope engine, hooks
+(`PreToolUse` / `UserPromptSubmit` / `Stop`), MCP server with seven tools, Judge, landing page,
+and the turn-boundary refresh are all built. Remaining: the 3-minute video, making the repo
+public, and publishing to npm.
 
 Superseded: the original "which endpoint can reach sensitive data" product. The graph work carries over; the thesis does not (`PROJECT_FINAL.md` §24).

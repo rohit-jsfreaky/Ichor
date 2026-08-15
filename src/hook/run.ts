@@ -20,8 +20,17 @@ import * as path from 'node:path';
 import { GraphClient, configFromEnv } from '../graph/client.js';
 import { classify, type Verdict } from '../scope/classify.js';
 import { parsePending } from '../scope/pending.js';
-import { loadTask, toNeighborhood, markChallenged } from '../state.js';
+import {
+  loadTask,
+  toNeighborhood,
+  markChallenged,
+  markForced,
+  recordOverlay,
+  type OverlayFile,
+} from '../state.js';
 import { parseHookInput, isEditingTool, type HookPayload } from './input.js';
+import { emitContext, handlePrompt } from './prompt.js';
+import { handleStop } from './stop.js';
 
 /** Beyond this, allow the edit rather than make the agent wait. */
 const TIME_BUDGET_MS = 5_000;
@@ -157,6 +166,25 @@ export async function runHook(): Promise<void> {
 
     const repoRoot = typeof payload.cwd === 'string' ? payload.cwd : process.cwd();
     logFile = path.join(repoRoot, '.ichor', 'hook.log');
+
+    // Route on the EVENT before anything else. The editing-tool gate below is
+    // fatal to a payload that carries no tool at all, so a prompt or a turn-end
+    // event would die there without ever reaching its handler.
+    const event = String(payload.hook_event_name ?? '');
+    if (event === 'UserPromptSubmit') {
+      debug('--- UserPromptSubmit');
+      const outcome = await handlePrompt(payload, repoRoot);
+      for (const line of outcome.log) debug(line);
+      emitContext(outcome.context);
+      process.exit(0);
+    }
+    if (event === 'Stop' || event === 'SubagentStop') {
+      debug(`--- ${event}`);
+      for (const line of handleStop(repoRoot)) debug(line);
+      allow();
+      return;
+    }
+
     debug(`--- ${String(payload.tool_name ?? '?')}`);
 
     const task = loadTask(repoRoot);
@@ -178,16 +206,47 @@ export async function runHook(): Promise<void> {
 
     const deadline = Date.now() + TIME_BUDGET_MS;
 
+    // Tier two: what the agent is writing, remembered so a file it creates now
+    // is understood when it builds on it two edits later. Name-based and weaker
+    // than the graph — never quoted back as evidence (rule 1).
+    const overlay: OverlayFile[] = [];
+    const seenAt = new Date().toISOString();
+
     for (const intent of intents) {
-      if (intent.operation === 'delete') continue;
-      if (settled.has(intent.file)) { debug(`${intent.file} already settled -> skip`); continue; }
+      if (intent.operation === 'delete') {
+        overlay.push({ path: intent.file, calls: [], imports: [], touches: [], routeMethods: [], deleted: true, at: seenAt });
+        continue;
+      }
+      if (settled.has(intent.file)) {
+        debug(`${intent.file} already settled -> skip`);
+        // Writing a challenged file again, with no justification recorded, is
+        // the agent pushing it through. Allowed — Ichor is not a blocker — but
+        // remembered, so this code never becomes evidence for the next change.
+        markForced(repoRoot, intent.file);
+        continue;
+      }
       if (Date.now() > deadline) { debug('time budget exhausted -> allow'); break; }
 
       const pending = intent.content ? parsePending(intent.file, intent.content) : undefined;
+      if (pending) {
+        overlay.push({
+          path: intent.file,
+          calls: pending.callsNames,
+          imports: pending.importsRepoFiles,
+          touches: pending.touches.map((t) => t.model),
+          routeMethods: pending.routeMethods,
+          at: seenAt,
+        });
+      }
 
       let verdict;
       try {
-        verdict = await classify(intent, { client, neighborhood, pending });
+        verdict = await classify(intent, {
+          client,
+          neighborhood,
+          pending,
+          forced: task!.forced.map((f) => f.file),
+        });
       } catch (error) {
         // One edit failing to classify must not stop the others, and must never
         // block. Surfaced under ICHOR_DEBUG so it is findable.
@@ -197,6 +256,10 @@ export async function runHook(): Promise<void> {
       debug(`${intent.file} -> ${verdict.decision}`);
 
       if (verdict.decision === 'SUSPICIOUS' || verdict.decision === 'HUMAN_REVIEW') {
+        // Record what we learned before challenging: the edit is about to be
+        // refused, so nothing here lands on disk, but the challenge itself is
+        // state we must not lose.
+        recordOverlay(repoRoot, overlay.filter((o) => o.path !== intent.file));
         markChallenged(repoRoot, intent.file);
         await client.close();
         deny(formatChallenge(verdict, task!.task));
@@ -204,6 +267,7 @@ export async function runHook(): Promise<void> {
       }
     }
 
+    recordOverlay(repoRoot, overlay);
     await client.close();
     debug('no challenge raised -> allow');
     allow();

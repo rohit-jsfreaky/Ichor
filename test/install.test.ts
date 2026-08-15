@@ -27,6 +27,58 @@ afterEach(() => {
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
+describe('the three events', () => {
+  it('registers all of them for both agents', () => {
+    installHooks(repo);
+
+    for (const [label, file] of [
+      ['claude', '.claude/settings.json'],
+      ['codex', '.codex/hooks.json'],
+    ] as const) {
+      const hooks = read(file).hooks;
+      // PreToolUse challenges. UserPromptSubmit notices the developer changing
+      // job. Stop rebuilds the graph while nobody is waiting. Missing any one
+      // fails silently — nothing errors, Ichor just stops keeping up.
+      for (const event of ['PreToolUse', 'UserPromptSubmit', 'Stop']) {
+        expect(hooks[event], `${label}: ${event}`).toBeDefined();
+        expect(Array.isArray(hooks[event][0].hooks), `${label}: ${event} nested`).toBe(true);
+        expect(hooks[event][0].hooks[0].command).toBe('ichor hook');
+      }
+    }
+  });
+
+  it('omits the matcher where neither host honours one', () => {
+    installHooks(repo);
+    const hooks = read('.claude/settings.json').hooks;
+
+    expect(hooks.PreToolUse[0].matcher).toBeDefined();
+    // Writing a matcher that is silently ignored invites someone to edit it and
+    // wonder why nothing changes.
+    expect(hooks.UserPromptSubmit[0].matcher).toBeUndefined();
+    expect(hooks.Stop[0].matcher).toBeUndefined();
+  });
+
+  it('adds a newly supported event to an install that predates it', () => {
+    // An older Ichor wrote only PreToolUse. Re-running init must add the rest
+    // without duplicating what is already there.
+    fs.mkdirSync(path.join(repo, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, '.claude/settings.json'),
+      JSON.stringify({
+        hooks: { PreToolUse: [{ matcher: 'Edit', hooks: [{ type: 'command', command: 'ichor hook' }] }] },
+      }),
+      'utf8',
+    );
+
+    installHooks(repo);
+    const hooks = read('.claude/settings.json').hooks;
+
+    expect(hooks.PreToolUse).toHaveLength(1);
+    expect(hooks.UserPromptSubmit).toHaveLength(1);
+    expect(hooks.Stop).toHaveLength(1);
+  });
+});
+
 describe('hook config shape', () => {
   it('gives BOTH agents the same nested hooks array', () => {
     installHooks(repo);

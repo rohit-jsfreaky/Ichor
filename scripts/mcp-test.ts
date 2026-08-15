@@ -117,7 +117,24 @@ async function main() {
 
     const list = await mcp.request('tools/list');
     const tools = (list.result as { tools?: { name: string }[] })?.tools ?? [];
-    check(`tools/list -> ${tools.length} tools`, tools.length === 5, tools.map((t) => t.name).join('\n'));
+    const names = tools.map((t) => t.name);
+    // Named rather than counted: a count assertion fails on every addition and
+    // says nothing about which tool went missing.
+    const expected = [
+      'ichor_task_status',
+      'ichor_get_scope',
+      'ichor_check_change',
+      'ichor_explain',
+      'ichor_request_scope_expansion',
+      'ichor_callers',
+      'ichor_paths',
+    ];
+    const missing = expected.filter((n) => !names.includes(n));
+    check(
+      `tools/list -> ${tools.length} tools`,
+      missing.length === 0,
+      missing.length ? `missing: ${missing.join(', ')}` : names.join('\n'),
+    );
 
     console.log('\n── tools ───────────────────────────────');
 
@@ -170,6 +187,42 @@ async function main() {
       }),
     );
     check('scope expansion refused without structural support', refused.startsWith('Not granted'), refused);
+
+    const callers = textOf(
+      await mcp.request('tools/call', { name: 'ichor_callers', arguments: { symbol: 'createVendor' } }),
+    );
+    check(
+      'ichor_callers finds who reaches createVendor',
+      callers.includes('POST') && callers.includes('createVendor is reached by'),
+      callers,
+    );
+
+    const unknown = textOf(
+      await mcp.request('tools/call', { name: 'ichor_callers', arguments: { symbol: 'noSuchFunction' } }),
+    );
+    // Rule 2: an empty result must say it is empty and why, not look like an answer.
+    check(
+      'ichor_callers is explicit when nothing calls a symbol',
+      unknown.includes('Nothing in the compiled graph calls'),
+      unknown,
+    );
+
+    const paths = textOf(
+      await mcp.request('tools/call', { name: 'ichor_paths', arguments: { model: 'Vendor' } }),
+    );
+    check(
+      'ichor_paths shows how endpoints reach Vendor',
+      paths.includes('→ Vendor') && paths.includes('/api/vendors'),
+      paths,
+    );
+
+    const filtered = textOf(
+      await mcp.request('tools/call', {
+        name: 'ichor_paths',
+        arguments: { model: 'Vendor', route: '/api/vendors' },
+      }),
+    );
+    check('ichor_paths honours the route filter', filtered.includes('/api/vendors'), filtered);
 
     const granted = textOf(
       await mcp.request('tools/call', {

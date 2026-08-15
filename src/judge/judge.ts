@@ -80,7 +80,20 @@ Rules you must follow:
 4. When the change may be a legitimate product decision but is not required by
    the task, that is HUMAN_DECISION. Do not decide product direction yourself.
 
-5. Be brief and concrete. Cite the evidence you relied on.
+5. Separate CONTRADICTED from UNVERIFIABLE, and treat them differently.
+
+   - The evidence shows the claim is false, or shows an existing path that
+     already does the job -> SUSPICIOUS_EXPANSION.
+   - The claim is about something a call graph structurally CANNOT see — the
+     order of screens in a wizard, what a user does before submitting, timing,
+     UX or product intent — and nothing in the evidence contradicts it ->
+     HUMAN_DECISION.
+
+   The absence of evidence for a claim of that kind is not evidence against it.
+   A graph of functions has no way to know a form has five steps. Refusing such
+   a claim outright asserts something you cannot know; ask the developer instead.
+
+6. Be brief and concrete. Cite the evidence you relied on.
 
 Answer with JSON only, in exactly this shape:
 {

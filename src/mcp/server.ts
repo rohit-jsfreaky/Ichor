@@ -18,6 +18,7 @@
 
 import * as readline from 'node:readline';
 import { GraphClient, configFromEnv } from '../graph/client.js';
+import { callersOf, functionsTouching, pathsToModel } from '../graph/queries.js';
 import { loadTask, toNeighborhood, markJustified, type PersistedTask } from '../state.js';
 import { classify } from '../scope/classify.js';
 import { parsePending } from '../scope/pending.js';
@@ -101,6 +102,38 @@ const TOOLS: ToolDefinition[] = [
         reason: { type: 'string', description: 'why this change is required BY THE TASK' },
       },
       required: ['file', 'reason'],
+    },
+  },
+  // The two below are not about policing at all. They exist because an agent
+  // that can ask the graph a structural question stops grepping for a name and
+  // opening every file that matches, which is where most of a session's tokens
+  // go. Descriptions are written to tell the agent WHEN to reach for them.
+  {
+    name: 'ichor_callers',
+    description:
+      'Who calls this function, directly or through a chain, and which HTTP endpoints reach it. ' +
+      'Use this before changing or deleting a function instead of searching the repo for its name — ' +
+      'the answer comes from the compiler, so it includes callers a text search would miss and ' +
+      'excludes matches in comments and strings.',
+    inputSchema: {
+      type: 'object',
+      properties: { symbol: { type: 'string', description: 'exact function name' } },
+      required: ['symbol'],
+    },
+  },
+  {
+    name: 'ichor_paths',
+    description:
+      'How the application reaches a database table: which endpoints, through which functions. ' +
+      'Use this when you need to know whether a way to read or write some data already exists, ' +
+      'before adding a new one. No file search can answer this.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        model: { type: 'string', description: 'model/table name, e.g. Vendor' },
+        route: { type: 'string', description: 'optional: only paths whose URL contains this' },
+      },
+      required: ['model'],
     },
   },
 ];
@@ -252,6 +285,7 @@ async function callTool(
             client,
             neighborhood: toNeighborhood(task),
             pending: content ? parsePending(file, content) : undefined,
+            forced: task.forced.map((f) => f.file),
           },
         );
 
@@ -306,7 +340,7 @@ async function callTool(
       // before letting the boundary grow.
       const verdict = await classify(
         { operation: 'edit', file },
-        { client: getGraph(), neighborhood: toNeighborhood(task) },
+        { client: getGraph(), neighborhood: toNeighborhood(task), forced: task.forced.map((f) => f.file) },
       );
 
       // GRAPH FIRST. If the structure already supports it, no model is needed.
@@ -370,6 +404,66 @@ async function callTool(
       ]
         .filter(Boolean)
         .join('\n');
+    }
+
+    case 'ichor_callers': {
+      const symbol = String(args.symbol ?? '').trim();
+      if (!symbol) throw new Error('symbol is required');
+
+      const result = await callersOf(getGraph(), symbol);
+      if (result.callers.length === 0 && result.routes.length === 0) {
+        return (
+          `Nothing in the compiled graph calls ${symbol}.\n` +
+          'It may be an entry point, called dynamically, or called from outside the analysed ' +
+          'files — static analysis is a floor, never a ceiling.'
+        );
+      }
+
+      const lines = [`${symbol} is reached by:`, ''];
+      for (const caller of result.callers) {
+        lines.push(`  ${caller.via === 'direct' ? '→' : '⇢'} ${caller.name.padEnd(24)} ${caller.file}`);
+      }
+      if (result.routes.length) {
+        lines.push('', 'Directly behind these endpoints:');
+        for (const r of result.routes) lines.push(`  ${r.method} ${r.path}`);
+      }
+      lines.push('', '→ direct call, ⇢ through a chain.');
+      // Rule 2: a bare list that happens to stop at the limit reads as complete.
+      if (result.truncated) {
+        lines.push(`⚠ truncated at ${result.limit} — there are more.`);
+      }
+      return lines.join('\n');
+    }
+
+    case 'ichor_paths': {
+      const model = String(args.model ?? '').trim();
+      if (!model) throw new Error('model is required');
+      const route = typeof args.route === 'string' ? args.route : undefined;
+
+      const graph = getGraph();
+      const result = await pathsToModel(graph, model, { route });
+
+      if (result.paths.length === 0) {
+        const touching = await functionsTouching(graph, model);
+        if (touching.functions.length === 0) return `Nothing in the graph touches ${model}.`;
+        const lines = [`No HTTP endpoint reaches ${model}, but these functions touch it:`, ''];
+        for (const f of touching.functions) lines.push(`  ${f.name.padEnd(24)} ${f.file}`);
+        if (touching.truncated) lines.push(`⚠ truncated at ${touching.limit} — there are more.`);
+        return lines.join('\n');
+      }
+
+      const lines = [`Ways the app reaches ${model}:`, ''];
+      for (const p of result.paths) {
+        lines.push(`  ${p.method} ${p.route} → ${p.handler} → ${p.reacher} → ${p.model}`);
+      }
+      lines.push(
+        '',
+        // Honest about what this is: HydraDB rejects algo.SPpaths over Bolt, so
+        // intermediate hops between handler and reacher are not listed.
+        'Summaries, not every hop: entry point, handler, the function that touches the data.',
+      );
+      if (result.truncated) lines.push(`⚠ truncated at ${result.limit} — there are more.`);
+      return lines.join('\n');
     }
 
     default:

@@ -65,6 +65,16 @@ export interface ClassifyDeps {
   neighborhood: Neighborhood;
   /** Parsed pending content, when the operation carries content. */
   pending?: PendingFacts;
+  /**
+   * Files that were challenged and then written anyway, without ever being
+   * justified.
+   *
+   * They are real code and they are in the graph, but they are not precedent.
+   * Citing one as "an existing path already does this" would let an agent clear
+   * a challenge by retrying, and then use the very code it forced through as
+   * the argument against the next change.
+   */
+  forced?: string[];
 }
 
 export async function classify(intent: ChangeIntent, deps: ClassifyDeps): Promise<Verdict> {
@@ -386,13 +396,18 @@ async function findDuplicateFlow(
     const rows = await client.run(
       `MATCH (r:Route)-[:HANDLED_BY]->(h:Function)-[:CALLS*1..4]->(f:Function)-[:TOUCHES]->(m:Model)
          WHERE m.name = $model
-         RETURN r.method AS method, r.path AS path, h.name AS handler, f.name AS reacher
+         RETURN r.method AS method, r.path AS path, h.name AS handler, f.name AS reacher,
+                r.file AS routeFile
          LIMIT 50`,
       { model: taskModel.name },
     );
 
+    const forced = new Set(deps.forced ?? []);
     const candidates = rows.records.filter((record) => {
       const handler = String(record.get('handler'));
+      const routeFile = String(record.get('routeFile') ?? '');
+      // Never argue from code the agent forced past a challenge.
+      if (forced.has(routeFile)) return false;
       return [...neighborhood.members.values()].some((m) => m.name === handler);
     });
     if (candidates.length === 0) continue;
@@ -454,8 +469,17 @@ async function findDuplicateFlow(
       model: taskModel.name,
       existingEntry: `${method} ${routePath}`,
       existingPath: `${method} ${routePath} → ${handler} → ${reacher} → ${taskModel.name}`,
+      // Says WHEN the constraint bites, not just that it exists.
+      //
+      // "Vendor.email is already unique" reads as "duplicate handling is already
+      // covered", and the Judge then refuses even a claim it cannot check — like
+      // an agent arguing it needs feedback BEFORE submit. A unique constraint on
+      // a write path is enforced at write time, and saying so leaves room for a
+      // requirement about a different moment to be judged on its merits.
       constraintNote: uniqueFields.length
-        ? `, where ${taskModel.name}.${uniqueFields[0]} is already unique`
+        ? `, where ${taskModel.name}.${uniqueFields[0]} is unique and a duplicate is rejected at ${
+            MUTATING_METHODS.has(method.toUpperCase()) ? 'write time' : 'request time'
+          }`
         : '',
       viaFile: touch.viaFile,
     };

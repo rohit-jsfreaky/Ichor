@@ -104,54 +104,78 @@ function alreadyInstalled(entries: unknown): boolean {
   return JSON.stringify(entries ?? '').includes('ichor hook');
 }
 
+/**
+ * The three events Ichor listens to, and whether the entry carries a matcher.
+ *
+ * `PreToolUse` filters by tool name. Neither host supports a matcher on the
+ * other two — Claude Code documents them as always firing, and Codex ignores any
+ * matcher it finds — so we omit it rather than write a field that silently means
+ * nothing.
+ */
+const EVENTS: { name: string; matcher?: string }[] = [
+  { name: 'PreToolUse', matcher: MATCHER },
+  { name: 'UserPromptSubmit' },
+  { name: 'Stop' },
+];
+
+/**
+ * Add Ichor to one event array, leaving everything else in the file alone.
+ *
+ * Always the NESTED shape — an entry carrying its own `hooks` array. Codex will
+ * read a flattened entry (`type`/`command` hoisted to the top level) without a
+ * word of complaint and then run nothing at all; it edited an entire repo
+ * unpoliced that way. Silence is the worst possible failure for a tool whose job
+ * is to speak up, so both hosts get the shape that is verified to work.
+ */
+function registerEvents(
+  hooks: Record<string, unknown>,
+  messages: string[],
+  label: string,
+): { hooks: Record<string, unknown>; added: string[] } {
+  const next = { ...hooks };
+  const added: string[] = [];
+
+  for (const event of EVENTS) {
+    const existing = Array.isArray(next[event.name]) ? [...(next[event.name] as unknown[])] : [];
+    // Scoped per event: the same command in a different event's array must not
+    // count as "already installed here".
+    if (alreadyInstalled(existing)) continue;
+
+    existing.push({
+      ...(event.matcher ? { matcher: event.matcher } : {}),
+      hooks: [{ type: 'command', command: COMMAND }],
+    });
+    next[event.name] = existing;
+    added.push(event.name);
+  }
+
+  if (added.length === 0) messages.push(`  ${label}: already installed`);
+  return { hooks: next, added };
+}
+
 function installClaudeCode(repoRoot: string, messages: string[]): boolean {
   const file = path.join(repoRoot, '.claude', 'settings.json');
   const settings = readJson(file);
+  const current = (settings.hooks ?? {}) as Record<string, unknown>;
 
-  const hooks = (settings.hooks ?? {}) as Record<string, unknown>;
-  const preToolUse = Array.isArray(hooks.PreToolUse) ? [...(hooks.PreToolUse as unknown[])] : [];
+  const { hooks, added } = registerEvents(current, messages, 'Claude Code');
+  if (added.length === 0) return true;
 
-  if (alreadyInstalled(preToolUse)) {
-    messages.push('  Claude Code: already installed');
-    return true;
-  }
-
-  preToolUse.push({
-    matcher: MATCHER,
-    hooks: [{ type: 'command', command: COMMAND }],
-  });
-
-  writeJson(file, { ...settings, hooks: { ...hooks, PreToolUse: preToolUse } });
-  messages.push(`  Claude Code: hook installed -> ${display(repoRoot, file)}`);
+  writeJson(file, { ...settings, hooks });
+  messages.push(`  Claude Code: ${added.join(', ')} -> ${display(repoRoot, file)}`);
   return true;
 }
 
 function installCodex(repoRoot: string, messages: string[]): boolean {
   const file = path.join(repoRoot, '.codex', 'hooks.json');
   const config = readJson(file);
+  const current = (config.hooks ?? {}) as Record<string, unknown>;
 
-  const hooks = (config.hooks ?? {}) as Record<string, unknown>;
-  const preToolUse = Array.isArray(hooks.PreToolUse) ? [...(hooks.PreToolUse as unknown[])] : [];
+  const { hooks, added } = registerEvents(current, messages, 'Codex');
+  if (added.length === 0) return true;
 
-  if (alreadyInstalled(preToolUse)) {
-    messages.push('  Codex: already installed');
-    return true;
-  }
-
-  // The SAME nested shape as Claude Code, not a flattened one.
-  //
-  // Codex reads `<repo>/.codex/hooks.json` happily, but each PreToolUse entry
-  // must carry its own `hooks` ARRAY. An entry with `type`/`command` hoisted to
-  // the top level parses without complaint and then runs nothing at all — Codex
-  // edited a whole repo unpoliced with no error anywhere. Silent, which is the
-  // worst possible failure for a tool whose entire job is to speak up.
-  preToolUse.push({
-    matcher: MATCHER,
-    hooks: [{ type: 'command', command: COMMAND }],
-  });
-
-  writeJson(file, { ...config, hooks: { ...hooks, PreToolUse: preToolUse } });
-  messages.push(`  Codex: hook installed -> ${display(repoRoot, file)}`);
+  writeJson(file, { ...config, hooks });
+  messages.push(`  Codex: ${added.join(', ')} -> ${display(repoRoot, file)}`);
   messages.push('    (Codex asks you to review and trust a new hook on first run)');
   return true;
 }

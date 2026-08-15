@@ -360,19 +360,40 @@ async function findDuplicateFlow(
     // Find the route in the task neighbourhood that already reaches this model,
     // and the chain that gets there. This is the sentence the agent is shown, so
     // it must come from the graph rather than be asserted.
+    //
+    // The LIMIT is deliberately far above what a real answer needs: HydraDB
+    // truncates silently, and a tight limit would decide which route we cite by
+    // row order before the ranking below ever sees the alternatives.
     const rows = await client.run(
       `MATCH (r:Route)-[:HANDLED_BY]->(h:Function)-[:CALLS*1..4]->(f:Function)-[:TOUCHES]->(m:Model)
          WHERE m.name = $model
          RETURN r.method AS method, r.path AS path, h.name AS handler, f.name AS reacher
-         LIMIT 5`,
+         LIMIT 50`,
       { model: taskModel.name },
     );
 
-    const inScope = rows.records.find((record) => {
+    const candidates = rows.records.filter((record) => {
       const handler = String(record.get('handler'));
       return [...neighborhood.members.values()].some((m) => m.name === handler);
     });
-    if (!inScope) continue;
+    if (candidates.length === 0) continue;
+
+    // Several existing routes can reach the same model, and the row order is the
+    // database's, not ours. Prefer the one that argues best: a route using the
+    // SAME METHOD as the pending file is the closest analogue of what the agent
+    // just wrote, so citing "GET /api/vendors" against a new POST is a weaker
+    // sentence than citing the existing POST. The path/handler tie-break keeps
+    // the message identical run to run, which matters when a developer compares
+    // two challenges.
+    const wantsMethod = new Set(pending.routeMethods.map((m) => m.toUpperCase()));
+    const inScope = candidates.sort((a, b) => {
+      const aMatch = wantsMethod.has(String(a.get('method')).toUpperCase()) ? 0 : 1;
+      const bMatch = wantsMethod.has(String(b.get('method')).toUpperCase()) ? 0 : 1;
+      if (aMatch !== bMatch) return aMatch - bMatch;
+      const byPath = String(a.get('path')).localeCompare(String(b.get('path')));
+      if (byPath !== 0) return byPath;
+      return String(a.get('handler')).localeCompare(String(b.get('handler')));
+    })[0];
 
     const method = String(inScope.get('method'));
     const routePath = String(inScope.get('path'));

@@ -1,7 +1,7 @@
 {
-  "name": "ichor",
+  "name": "ichor-cli",
   "version": "0.1.0",
-  "description": "Every path from your endpoints to your data. Reachability analysis for TypeScript codebases, on HydraDB.",
+  "description": "Make every scope expansion explicit while AI coding agents work. Built on HydraDB.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -10,6 +10,11 @@
   "bin": {
     "ichor": "./dist/src/cli.js"
   },
+  "files": [
+    "dist/src",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "smoke": "tsx scripts/smoke.ts",
     "spike": "tsx scripts/spike-tsmorph.ts",

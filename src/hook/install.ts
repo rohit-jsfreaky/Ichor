@@ -15,9 +15,22 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import { COMPOSE_FILE } from '../stack/compose.js';
+import { writeStack } from '../stack/stack.js';
+
 /** Matches file-editing tools across both hosts. Codex reports apply_patch. */
 const MATCHER = 'Edit|Write|MultiEdit|apply_patch';
-const COMMAND = 'npx ichor hook';
+
+/**
+ * Deliberately `ichor`, not `npx ichor`.
+ *
+ * The npm name is `ichor-cli` because `ichor` is already taken by an unrelated
+ * 0.0.0 placeholder. `npx ichor hook` would therefore MISS locally and download
+ * a stranger's package, then run it on every edit the agent makes. A hook is
+ * the last place to accept that risk, so we call the binary that `npm i -g
+ * ichor-cli` puts on PATH and fail loudly if it is absent.
+ */
+const COMMAND = 'ichor hook';
 
 export interface InstallResult {
   messages: string[];
@@ -30,6 +43,12 @@ export function installHooks(repoRoot: string): InstallResult {
   const claudeCode = installClaudeCode(repoRoot, messages);
   const codex = installCodex(repoRoot, messages);
   installMcp(repoRoot, messages);
+
+  // A global `npm i -g ichor-cli` gives you the CLI and nothing to run it
+  // against, so init also drops the graph database next to the hooks.
+  writeStack(repoRoot);
+  messages.push(`  HydraDB stack: written -> ${COMPOSE_FILE}`);
+
   return { messages, claudeCode, codex };
 }
 
@@ -52,12 +71,17 @@ function installMcp(repoRoot: string, messages: string[]): void {
 
   servers.ichor = {
     type: 'stdio',
-    command: 'npx',
-    args: ['ichor', 'mcp', '--repo', '.'],
+    command: 'ichor',
+    args: ['mcp', '--repo', '.'],
   };
 
   writeJson(file, { ...config, mcpServers: servers });
-  messages.push(`  MCP server: registered -> ${path.relative(repoRoot, file)}`);
+  messages.push(`  MCP server: registered -> ${display(repoRoot, file)}`);
+}
+
+/** Config paths read the same on Windows as everywhere else. */
+function display(repoRoot: string, file: string): string {
+  return path.relative(repoRoot, file).split(path.sep).join('/');
 }
 
 function readJson(file: string): Record<string, unknown> {
@@ -98,7 +122,7 @@ function installClaudeCode(repoRoot: string, messages: string[]): boolean {
   });
 
   writeJson(file, { ...settings, hooks: { ...hooks, PreToolUse: preToolUse } });
-  messages.push(`  Claude Code: hook installed -> ${path.relative(repoRoot, file)}`);
+  messages.push(`  Claude Code: hook installed -> ${display(repoRoot, file)}`);
   return true;
 }
 
@@ -121,7 +145,7 @@ function installCodex(repoRoot: string, messages: string[]): boolean {
   });
 
   writeJson(file, { ...config, hooks: { ...hooks, PreToolUse: preToolUse } });
-  messages.push(`  Codex: hook installed -> ${path.relative(repoRoot, file)}`);
+  messages.push(`  Codex: hook installed -> ${display(repoRoot, file)}`);
   messages.push('    (Codex asks you to review and trust a new hook on first run)');
   return true;
 }

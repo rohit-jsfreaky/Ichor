@@ -3,9 +3,11 @@
  * The `ichor` command.
  *
  *   ichor init                install hooks for Claude Code and Codex
+ *   ichor up                  start the local HydraDB stack
  *   ichor start "<task>"      analyse, build the neighbourhood, begin watching
  *   ichor status              what is currently in scope
  *   ichor stop                end the task, stop policing
+ *   ichor down                stop the stack
  *   ichor hook                internal — invoked by the agents' PreToolUse hook
  */
 
@@ -21,6 +23,7 @@ import { buildNeighborhood } from './scope/neighborhood.js';
 import { saveTask, loadTask, clearTask, stateDir } from './state.js';
 import { runHook } from './hook/run.js';
 import { installHooks } from './hook/install.js';
+import { up, down, isRunning } from './stack/stack.js';
 
 const program = new Command();
 
@@ -49,7 +52,27 @@ program
       }
     }
 
-    console.log('\nNext: ichor start "your task"\n');
+    console.log('\nNext: ichor up   (starts HydraDB)');
+    console.log('Then: ichor start "your task"\n');
+  });
+
+program
+  .command('up')
+  .description('start the local HydraDB stack')
+  .option('--repo <path>', 'repository root', process.cwd())
+  .action(async (options: { repo: string }) => {
+    const code = await up(path.resolve(options.repo));
+    if (code !== 0) process.exitCode = code;
+  });
+
+program
+  .command('down')
+  .description('stop the local HydraDB stack')
+  .option('--repo <path>', 'repository root', process.cwd())
+  .option('--wipe', 'also delete the stored graph', false)
+  .action(async (options: { repo: string; wipe: boolean }) => {
+    const code = await down(path.resolve(options.repo), options.wipe);
+    if (code !== 0) process.exitCode = code;
   });
 
 program
@@ -61,6 +84,16 @@ program
   .action(async (taskWords: string[], options: { repo: string; depth: string }) => {
     const repoRoot = path.resolve(options.repo);
     const task = taskWords.join(' ');
+
+    // Analysing first and failing at the graph write wastes the slowest step and
+    // reports it as a driver error. Check the database is there while it is
+    // still cheap to say so plainly.
+    if (!(await isRunning())) {
+      console.error('\nHydraDB is not answering on the Bolt port.');
+      console.error('Start it with: ichor up\n');
+      process.exitCode = 1;
+      return;
+    }
 
     console.log(`\ntask: "${task}"\n`);
 

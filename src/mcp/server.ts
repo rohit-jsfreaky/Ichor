@@ -12,7 +12,7 @@
  * an MCP tool, so nothing here is trusted to keep scope honest — the hook does
  * that. These tools only make the conversation possible.
  *
- * Speaks MCP over stdio using JSON-RPC 2.0 directly. No SDK: the surface is five
+ * Speaks MCP over stdio using JSON-RPC 2.0 directly. No SDK: the surface is seven
  * tools and adding a dependency for that would be the larger risk.
  */
 

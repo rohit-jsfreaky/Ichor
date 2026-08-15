@@ -77,6 +77,45 @@ Ichor is not a file fence. Edits are classified as:
 
 **Silence is the normal state.** A tool that fires on every third edit gets uninstalled the same afternoon. Ichor also asks **once per file** — it states its case and then gets out of the way.
 
+When an agent clears a challenge by simply writing the file again rather than explaining, that is allowed — Ichor is not a blocker — but it is **remembered**. Forced files show up in `ichor status` and are never cited as an "existing path" against some later change, so a bypassed challenge cannot become tomorrow's precedent.
+
+## The boundary follows the conversation
+
+Nobody runs a CLI command between tasks. People work all day in one Claude Code or Codex session, and a boundary drawn for the 9am task spends the afternoon challenging every edit of a different one. At that point Ichor is not a safety net — it is the thing you turn off.
+
+So the boundary moves with you:
+
+```
+you  › fix the duplicate email crash in vendor onboarding
+  [ichor] task set — 14 functions, data: Vendor
+
+you  › continue
+  [ichor] nothing changes — that names no part of the codebase
+
+···  hours later, same conversation  ···
+
+you  › now fix the rounding on billing invoices
+  [ichor] new task — 3 functions, data: Invoice
+```
+
+Every prompt is classified against a cached index of every name in the repo:
+
+| | |
+|---|---|
+| **NO SIGNAL** | names nothing in the codebase — change nothing |
+| **SAME** | points inside the boundary — carry on |
+| **WIDENED** | points inside *and* somewhere new — grow, keep the challenge history |
+| **NEW** | points only outside — redraw, and forget what was already asked |
+
+The bias runs one way: anything ambiguous resolves to **NO SIGNAL**, which changes nothing. "Continue", "that didn't work", a question, a pasted stack trace, a prompt in another language — none of them move a boundary. Detection is pure string work against a cached index, so it costs a file read and no analysis.
+
+Two more things happen around the turn:
+
+- **The graph rebuilds when the agent stops talking**, in a detached process, because you are reading the answer and nobody is waiting. Measured at ~1.6s on the demo and ~2.8s on this repo — it could never run on a keystroke.
+- **The agent is told the boundary before it starts.** Each turn opens with what is in scope and what data the task is about, so over-reach is mostly prevented rather than punished.
+
+`ichor start "…"` still names a task by hand. That sets `mode: explicit`, and detection then reports a job change without redrawing a boundary you chose yourself.
+
 ## Quick start
 
 ```bash
@@ -124,10 +163,11 @@ npm run up          # HydraDB + MinIO via Docker
 npm run smoke       # a listening port is not proof — this round-trips a real write
 npm run build
 
-npm test            # 44 unit tests
-npm run check       # 7 classification scenarios end to end
+npm test            # 89 unit tests
+npm run check       # 10 classification scenarios, including a mid-session job switch
 npm run hook:test   # 6 hook cases, spawning the real CLI as an agent would
-npm run mcp:test    # 9 MCP protocol checks
+npm run mcp:test    # 13 MCP protocol checks
+npm run judge:test  # 3 live Judge cases (needs an OpenRouter key; skips without one)
 ```
 
 To watch it work on the demo app:
@@ -137,14 +177,15 @@ node dist/src/cli.js start "fix duplicate email handling in vendor onboarding" -
 ```
 
 ```
-  reading the codebase…  17 functions, 10 calls, 2 routes
-  building the graph…    57 nodes, 71 edges
+  reading the codebase… 17 functions, 10 calls, 2 routes
   finding the task area… 13 functions
 
 Data this task is about: Vendor
 
 Watching. Run your agent as usual.
 ```
+
+`npm run check` is the one to read. It runs the vendor task, then **switches job mid-session** to billing and re-runs two edits: the billing file that was SUSPICIOUS under the first task must now be EXPECTED, and the vendor code that was in scope must not be. That flip is the whole point of the boundary following the conversation.
 
 [`demo/EXPECTED-GRAPH.md`](demo/EXPECTED-GRAPH.md) is the graph hand-derived from the source **before** the analyzer was written, so the analyzer could not be quietly bent to match whatever it happened to output.
 
@@ -234,19 +275,23 @@ src/
   extract/     ts-morph → functions, calls, routes, Prisma models   (no LLM)
   graph/       the only place that talks to HydraDB over Bolt
   scope/       anchors → neighbourhood → the two tests
-  hook/        PreToolUse handler + installer for both agents
-  mcp/         MCP server over stdio, so the agent can argue
+               taskSwitch.ts — is this prompt still the same job? (pure, no I/O)
+  hook/        the three events, and the installer for both agents
+  refresh/     the detached rebuild that runs between turns
+  mcp/         MCP server over stdio, so the agent can argue and ask
   judge/       OpenRouter, used only to weigh an argument
   stack/       the local HydraDB stack Ichor writes into your repo
   ids.ts       stable node ids — the load-bearing 60 lines
 demo/          Next.js + Prisma app with the real bug in it
 ```
 
-Two decisions carried most of the weight:
+Three decisions carried most of the weight:
 
 **Ids are content-derived, not database-assigned.** FNV-1a folded to 52 bits so a JS number holds it exactly, with paths normalised so Windows and Linux produce the same id for the same file. A collision throws rather than silently merging two functions into one node.
 
 **Precision over recall.** Ichor stays silent when it is unsure. A false challenge costs trust; a missed one costs nothing that a code review would not have cost anyway.
+
+**Two tiers of knowledge, permanently separated.** The compiled graph is the only thing that may be quoted as evidence. While the agent works, code it has just written is tracked as a much weaker, name-based overlay — enough to see that a new file connects to something it made two edits ago, never enough to appear in a challenge. Folding that cheap parse into the graph would mean challenging an agent on relationships the compiler never confirmed, and the whole product rests on not doing that.
 
 ## Notes for HydraDB
 
@@ -273,12 +318,12 @@ The Cypher subset was never a problem in practice. Depth is close to free — th
 - **The graph is rebuilt between turns, not during them.** While the agent works, new code it writes is tracked as a weaker, name-based hint — good enough to see that a new file connects to something it just created, never good enough to be quoted as evidence. The compiled graph is rebuilt when the agent stops talking. So within a single turn the graph can be a few edits behind.
 - **Task detection can be wrong.** It moves the boundary only when a prompt points somewhere the boundary does not cover, and anything ambiguous — "continue", a pasted stack trace, a question — changes nothing. `ichor status` always shows what it decided, and `ichor start` overrides it.
 - **One conversation at a time per repo.** Task state is per-repo, so two agent sessions in the same checkout share one boundary; the newer session takes it over. Per-session isolation is not built.
-- **One repo at a time.** `ichor start` wipes the graph and rebuilds it, so a single local HydraDB holds one codebase at a time. Starting a task in a second repo replaces the first — go back and you simply run `ichor start` again.
+- **One repo at a time.** Every rebuild wipes the graph and rewrites it, so a single local HydraDB holds one codebase at a time. Watching a second repo replaces the first — go back to it and `ichor watch` again.
 - **Ichor can be wrong.** When it cannot validate a justification it asks you, rather than deciding for you.
 
 ## Roadmap
 
-Python analyser · cross-language repositories · Cursor / Windsurf / Gemini / Cline adapters · incremental graph updates during a task · team history (*"what does a task like this normally touch in this codebase?"*).
+Python analyser · cross-language repositories · Cursor / Windsurf / Gemini / Cline adapters · per-session boundaries so two agents can share a repo · team history (*"what does a task like this normally touch in this codebase?"*).
 
 ## Credits
 

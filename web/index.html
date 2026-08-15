@@ -218,6 +218,7 @@
     <nav class="nav-links">
       <a href="#problem">The problem</a>
       <a href="#how">How it works</a>
+      <a href="#allday">All day</a>
       <a href="#agents">Agents</a>
       <a href="#install">Install</a>
       <a class="keep" href="https://github.com/rohit-jsfreaky/ichor">GitHub</a>
@@ -330,8 +331,8 @@
         <div class="step">
           <div class="n">3</div>
           <div>
-            <h3>Find where the task lives</h3>
-            <p>Anchor the task text to real routes, functions and fields, then walk outward through actual call structure to the connected neighbourhood.</p>
+            <h3>Take the task from what you asked</h3>
+            <p>You never type a task. Ichor reads the prompt you gave the agent, anchors it to real routes, functions and fields, then walks outward through actual call structure.</p>
           </div>
         </div>
         <div class="step">
@@ -346,6 +347,13 @@
           <div>
             <h3>Challenge, then listen</h3>
             <p>When work expands, Ichor asks why and shows the path it walked. The agent can argue back over MCP — and the graph, not the argument, decides.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="n">6</div>
+          <div>
+            <h3>Redraw itself between turns</h3>
+            <p>When the agent stops talking, the graph rebuilds in the background. When you type again, Ichor checks whether you are still on the same job.</p>
           </div>
         </div>
       </div>
@@ -400,11 +408,59 @@
     </div>
   </section>
 
+  <!-- ------------------------------------------------------- all day -->
+  <section id="allday">
+    <div class="shell">
+      <div class="section-head">
+        <span class="eyebrow">05 / All day, one chat</span>
+        <h2>The Boundary Follows The Conversation.</h2>
+        <p>
+          Nobody runs a command between tasks. You fix a bug at 9am and you are somewhere else
+          entirely by 2pm — in the same conversation. A boundary drawn for the morning would spend
+          the afternoon questioning every edit, and you would switch it off by lunch.
+        </p>
+      </div>
+      <div class="terminal" style="margin-top:0">
+        <div class="terminal-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span style="margin-left:8px">one session, hours apart</span>
+        </div>
+<div class="terminal-body"><span class="muted">you  ›</span> fix the duplicate email crash in vendor onboarding
+  <span class="ok">[ichor] task set — 14 functions, data: Vendor</span>
+
+<span class="muted">you  ›</span> continue
+  <span class="muted">[ichor] nothing changes — that names no part of the codebase</span>
+
+<span class="muted">···  hours later, same conversation  ···</span>
+
+<span class="muted">you  ›</span> now fix the rounding on billing invoices
+  <span class="ok">[ichor] new task — 3 functions, data: Invoice</span></div>
+      </div>
+      <div class="grid grid-3" style="margin-top:28px">
+        <div class="card">
+          <span class="num">IT NOTICES</span>
+          <h3>You Changed Subject</h3>
+          <p>A prompt pointing somewhere the boundary does not cover redraws it. One that points inside just carries on.</p>
+        </div>
+        <div class="card">
+          <span class="num">IT IGNORES</span>
+          <h3>Everything Else</h3>
+          <p>"Continue", "that didn't work", a pasted stack trace, a question. Anything ambiguous changes nothing at all.</p>
+        </div>
+        <div class="card">
+          <span class="num">IT TELLS THE AGENT</span>
+          <h3>Before It Starts</h3>
+          <p>Each turn begins with the boundary in the agent's context, so over-reach is mostly prevented rather than punished.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ---------------------------------------------------------- agents -->
   <section id="agents">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">05 / Agents</span>
+        <span class="eyebrow">06 / Agents</span>
         <h2>One Layer, Underneath Your Agent.</h2>
         <p>
           Ichor is not a plugin for one tool. Hooks make sure the agent cannot forget it exists;
@@ -421,6 +477,24 @@
           <tr><td class="agent">Cursor · Windsurf · Gemini CLI · Cline</td><td class="level soon">Coming</td><td class="how">Same adapter interface.</td></tr>
         </tbody>
       </table>
+
+      <p style="margin-top:34px;max-width:640px;color:var(--dim);line-height:1.7">
+        The agent can also just ask. Before writing a line, a real Codex run searched the repo for
+        five words, got 116 hits and read six whole files — working out which code the task lived in.
+        Ichor had answered that in 14ms and could have simply been asked.
+      </p>
+      <div class="grid grid-2" style="margin-top:22px">
+        <div class="card">
+          <span class="num">ICHOR_CALLERS</span>
+          <h3>Who Uses This?</h3>
+          <p>Every function that reaches it, and the endpoints behind them. From the compiler, so it finds callers a text search misses and skips matches inside comments.</p>
+        </div>
+        <div class="card">
+          <span class="num">ICHOR_PATHS</span>
+          <h3>How Do We Reach This Data?</h3>
+          <p>Which endpoints can end up touching a table, and through which function. No file search can answer that one.</p>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -428,8 +502,8 @@
   <section id="install">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">06 / Install</span>
-        <h2>Three Commands.</h2>
+        <span class="eyebrow">07 / Install</span>
+        <h2>Three Commands, And No Task To Type.</h2>
         <p>Your code never leaves your machine. Ichor runs HydraDB locally, so the graph of your codebase stays on your disk. There is no account.</p>
       </div>
       <div class="terminal" style="margin-top:0">
@@ -440,21 +514,21 @@
 <div class="terminal-body"><span class="ok">$</span> npm i -g ichor-cli
 
 <span class="ok">$</span> ichor init
-  <span class="muted">Claude Code: hook installed  -> .claude/settings.json</span>
-  <span class="muted">Codex:       hook installed  -> .codex/hooks.json</span>
-  <span class="muted">MCP server:  registered     -> .mcp.json</span>
+  <span class="muted">Claude Code: PreToolUse, UserPromptSubmit, Stop -> .claude/settings.json</span>
+  <span class="muted">Codex:       PreToolUse, UserPromptSubmit, Stop -> .codex/hooks.json</span>
+  <span class="muted">MCP server:  registered                        -> .mcp.json</span>
 
-<span class="ok">$</span> ichor start <span class="u">"fix duplicate email handling in vendor onboarding"</span>
-  <span class="muted">reading the codebase…  17 functions, 10 calls, 2 routes</span>
-  <span class="muted">building the graph…    57 nodes, 71 edges</span>
-  <span class="muted">finding the task area… 13 functions</span>
+<span class="ok">$</span> ichor up
+  <span class="muted">HydraDB and MinIO, on your machine.</span>
 
-  <span class="muted">Data this task is about: Vendor</span>
+<span class="ok">$</span> ichor watch
+  <span class="muted">reading the codebase… 17 functions, 10 calls, 2 routes</span>
 
-  <span class="ok">Watching. Run your agent as usual.</span></div>
+  <span class="ok">Watching. Run your agent as usual — Ichor picks the task up from your prompts.</span></div>
       </div>
       <p style="margin-top:22px;color:var(--faint);font-size:14px">
         Requires Node 20+, Docker, and a TypeScript repo — ideally Next.js with Prisma.
+        Prefer to name the task yourself? <code style="font-family:var(--mono)">ichor start "…"</code> still does exactly that.
       </p>
     </div>
   </section>
@@ -463,14 +537,17 @@
   <section id="limits">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">07 / Honestly</span>
+        <span class="eyebrow">08 / Honestly</span>
         <h2>What It Cannot Do.</h2>
         <p>A tool that claims to know where a task belongs should be precise about where it is blind.</p>
       </div>
       <ul class="plain">
         <li><strong style="color:var(--fg);font-weight:400">TypeScript and JavaScript only.</strong> Python is next. Nothing else is claimed.</li>
         <li><strong style="color:var(--fg);font-weight:400">Static analysis.</strong> Dynamic dispatch and runtime-constructed calls are invisible, so results are a floor and never a ceiling.</li>
-        <li><strong style="color:var(--fg);font-weight:400">Shell writes are unseen.</strong> Ichor hooks the agents' edit tools; a file written by <code style="font-family:var(--mono);font-size:13px">cat &gt;</code> or a codegen script bypasses it.</li>
+        <li><strong style="color:var(--fg);font-weight:400">Shell writes cannot be challenged.</strong> Ichor hooks the agents' edit tools, and a file written by <code style="font-family:var(--mono);font-size:13px">cat &gt;</code> or a codegen script never announces itself — you would have to predict what an arbitrary command will write. It shows up on the map at the next rebuild, so Ichor catches up; it just cannot ask why in the moment.</li>
+        <li><strong style="color:var(--fg);font-weight:400">Task detection can be wrong.</strong> It moves the boundary only when a prompt points somewhere the boundary does not cover. <code style="font-family:var(--mono);font-size:13px">ichor status</code> always shows what it decided, and naming a task by hand overrides it.</li>
+        <li><strong style="color:var(--fg);font-weight:400">The graph is rebuilt between turns, not during them.</strong> Within a single turn it can be a few edits behind.</li>
+        <li><strong style="color:var(--fg);font-weight:400">One conversation at a time per repo.</strong> Two agent sessions in the same checkout share one boundary.</li>
         <li><strong style="color:var(--fg);font-weight:400">The boundary is an expectation, not a fact.</strong> It is designed to grow when the work justifies it.</li>
         <li><strong style="color:var(--fg);font-weight:400">Ichor can be wrong.</strong> When it cannot validate a justification it asks you, rather than deciding for you.</li>
       </ul>

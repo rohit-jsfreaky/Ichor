@@ -60,6 +60,8 @@ export interface Neighborhood {
     memberCount: number;
     maxDistance: number;
     queryCount: number;
+    /** True when the member cap stopped the walk before it finished. */
+    truncated: boolean;
     durationMs: number;
   };
 }
@@ -74,8 +76,57 @@ export interface BuildOptions {
    * recall.
    */
   maxDepth?: number;
+  /**
+   * How far to walk BACKWARDS, to things that call the task's code.
+   *
+   * One hop, deliberately, and this is the single most important number here.
+   * The two directions are not symmetric:
+   *
+   *   outward  the task's code calls X — X is probably part of the job
+   *   inward   Y calls the task's code — Y is a CONSUMER of it, and every
+   *            shared helper has hundreds of those
+   *
+   * Measured on a real 1,386-file codebase at equal depth: 804 of 1,271 members
+   * arrived by walking inward, and the boundary swallowed 56% of the repository.
+   * A neighbourhood that contains everything challenges nothing.
+   *
+   * One hop still catches the case that matters — the form component that calls
+   * the submit function belongs to the task — without following every consumer
+   * of every utility.
+   */
+  maxInboundDepth?: number;
+  /**
+   * Hard ceiling on members — a backstop, not a tuning knob.
+   *
+   * Set high on purpose. Trimming the walk does not just shrink the boundary, it
+   * pushes genuinely-related functions OUTSIDE it, and everything outside gets
+   * challenged. A tight cap therefore manufactures exactly the false positives
+   * that get a tool uninstalled (rule 1a). Measured on a 1,386-file repo, an
+   * honest walk settles at 317; this only fires on something pathological, and
+   * says so when it does (rule 2).
+   */
+  maxMembers?: number;
   onProgress?: (message: string) => void;
 }
+
+/**
+ * Past this many users, a shape is the app's furniture rather than its subject.
+ *
+ * Applies to every anchor that names a SHAPE rather than a piece of code — a
+ * type, a model, a field. Each of those seeds "everything that uses this", and
+ * in a real codebase the central entity is used by hundreds of functions. On a
+ * 1,386-file product, `Link.linkType` seeded ~200 functions before one hop was
+ * even walked, so "fix the typo in the delete link confirmation modal" claimed
+ * 232 functions at depth 1 and 517 at depth 3.
+ *
+ * Measured distribution of type usage in that codebase: 432 types used by one
+ * function, 185 by two to five, 29 by six to twenty-five, and only TWO above it.
+ * A type that genuinely IS the subject sits well under the line — `LinkWithViews`
+ * had 22. So the line separates subjects from furniture rather than trimming
+ * arbitrarily, and skipping is safe: the anchor is still recorded, we simply do
+ * not treat every user of it as part of the job.
+ */
+const MAX_SHAPE_USERS = 25;
 
 export async function buildNeighborhood(
   client: GraphClient,
@@ -86,6 +137,9 @@ export async function buildNeighborhood(
 ): Promise<Neighborhood> {
   const started = Date.now();
   const maxDepth = options.maxDepth ?? 3;
+  const maxInboundDepth = options.maxInboundDepth ?? 1;
+  const maxMembers = options.maxMembers ?? 800;
+  let truncated = false;
   const progress = options.onProgress ?? (() => {});
   const ids = new IdRegistry();
 
@@ -136,6 +190,36 @@ export async function buildNeighborhood(
       continue;
     }
 
+    if (anchor.kind === 'type') {
+      // A type is not editable code on its own, so it seeds the functions that
+      // USE it — which is how "add a status field to the Vendor type" finds the
+      // handlers, serialisers and components that would have to change with it.
+      const rows = await client.run(
+        `MATCH (f:Function)-[:REFERENCES]->(t:Type {id: $id})
+           RETURN f.id AS id, f.name AS name, f.file AS file`,
+        { id: anchorId },
+      );
+      queryCount++;
+
+      // A type everything uses defines nothing.
+      //
+      // Measured on a 1,386-file codebase: of 648 types, 432 are used by a single
+      // function and only TWO by more than 25 — `CustomUser` at 228 and a config
+      // union at 42. Those are shared shapes, not subjects; seeding every user of
+      // one is the same mistake as walking inward through a shared helper, and it
+      // pushed a boundary to 800 functions. A genuinely focused type sits well
+      // under the line: `LinkWithViews`, the actual subject of that task, had 22.
+      if (rows.records.length > MAX_SHAPE_USERS) {
+        progress(
+          `${anchor.name} is used by ${rows.records.length} functions — too general to define a task`,
+        );
+        continue;
+      }
+
+      seeds.push(...absorb(rows.records, 0, () => `uses ${anchor.name}`));
+      continue;
+    }
+
     if (anchor.kind === 'route') {
       const rows = await client.run(
         `MATCH (r:Route {id: $id})-[:HANDLED_BY]->(f:Function)
@@ -155,6 +239,12 @@ export async function buildNeighborhood(
         { id: gInt(ids.idFor(modelKey)) },
       );
       queryCount++;
+      if (rows.records.length > MAX_SHAPE_USERS) {
+        progress(
+          `${anchor.name} is touched by ${rows.records.length} functions — the app's core entity, not this task`,
+        );
+        continue;
+      }
       seeds.push(...absorb(rows.records, 0, () => `touches ${anchor.name} — ${anchor.why}`));
     }
   }
@@ -181,16 +271,28 @@ export async function buildNeighborhood(
       queryCount++;
       next.push(...absorb(callees.records, depth, () => `called by ${fromName}`));
 
-      const callers = await client.run(
-        `MATCH (b:Function)-[:CALLS]->(a:Function {id: $id})
-           RETURN b.id AS id, b.name AS name, b.file AS file`,
-        { id: param },
-      );
-      queryCount++;
-      next.push(...absorb(callers.records, depth, () => `calls ${fromName}`));
+      // Consumers, only close to the anchors. See maxInboundDepth.
+      if (depth <= maxInboundDepth) {
+        const callers = await client.run(
+          `MATCH (b:Function)-[:CALLS]->(a:Function {id: $id})
+             RETURN b.id AS id, b.name AS name, b.file AS file`,
+          { id: param },
+        );
+        queryCount++;
+        next.push(...absorb(callers.records, depth, () => `calls ${fromName}`));
+      }
+
+      if (members.size >= maxMembers) {
+        truncated = true;
+        break;
+      }
     }
 
     frontier = [...new Set(next)];
+    if (truncated) {
+      progress(`stopped at ${members.size} functions — the task area is larger than the cap`);
+      break;
+    }
     if (frontier.length) progress(`depth ${depth}: +${frontier.length} functions`);
   }
 
@@ -227,6 +329,7 @@ export async function buildNeighborhood(
       memberCount: members.size,
       maxDistance: distances.length ? Math.max(...distances) : 0,
       queryCount,
+      truncated,
       durationMs: Date.now() - started,
     },
   };

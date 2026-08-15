@@ -43,6 +43,33 @@ export interface RouteFact extends SourceLocation {
   handlerKey: string;
 }
 
+/**
+ * A named type: an interface, type alias, enum or class.
+ *
+ * In TypeScript a large share of the structure is types, and Ichor recorded none
+ * of it. Without these, a task like "add a status field to the Vendor type"
+ * anchors to nothing in an app that has no Prisma schema to name `Vendor` for
+ * us, and Ichor stays silent for the whole job.
+ */
+export interface TypeFact extends SourceLocation {
+  /** Stable key: `type:<file>#<Name>` */
+  key: string;
+  name: string;
+  kind: 'interface' | 'alias' | 'enum' | 'class';
+  exported: boolean;
+}
+
+/**
+ * A function that mentions a type — in a parameter, a return, an annotation.
+ *
+ * Resolved through the compiler like every other edge, so `Vendor` here is THE
+ * `Vendor` that was declared over there, not merely something with the same name.
+ */
+export interface ReferenceEdge extends SourceLocation {
+  fromKey: string;
+  toKey: string;
+}
+
 export interface ModelFact {
   /** Stable key: `model:<name>` */
   key: string;
@@ -92,6 +119,25 @@ export interface ExtractionStats {
   callSitesResolvedInRepo: number;
   callSitesExternal: number;
   callSitesUnresolved: number;
+  /** Type mentions the compiler resolved to a type declared in this repo. */
+  typeRefsResolved: number;
+  /**
+   * Type mentions that did not land on a type declared in this repo.
+   *
+   * Mostly library types — React, Prisma, node built-ins — which are not misses,
+   * just not ours. Reported together because telling the two apart cheaply is not
+   * possible here, and overstating success would be worse than overstating
+   * failure (rule 2).
+   */
+  typeRefsUnresolved: number;
+  /**
+   * Edges discarded because an endpoint node was not emitted.
+   *
+   * Should be zero. A non-zero count means the extractor found a relationship it
+   * could not anchor to both ends — reported rather than swallowed, because
+   * HydraDB rejects the entire write when an endpoint is missing.
+   */
+  edgesDropped: number;
   /** Wall-clock milliseconds for the whole extraction. */
   durationMs: number;
 }
@@ -104,7 +150,9 @@ export interface GraphFacts {
   routes: RouteFact[];
   models: ModelFact[];
   fields: FieldFact[];
+  types: TypeFact[];
   calls: CallEdge[];
+  references: ReferenceEdge[];
   touches: TouchEdge[];
   imports: ImportEdge[];
   stats: ExtractionStats;

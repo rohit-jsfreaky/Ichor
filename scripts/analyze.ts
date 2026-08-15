@@ -29,6 +29,7 @@ console.log('── totals ─────────────────�
 console.log(`  files          ${facts.files.length}`);
 console.log(`  functions      ${facts.functions.length}`);
 console.log(`  routes         ${facts.routes.length}`);
+console.log(`  types          ${facts.types.length}`);
 console.log(`  models         ${facts.models.length}`);
 console.log(`  fields         ${facts.fields.length}`);
 console.log(`  CALLS edges    ${facts.calls.length}`);
@@ -40,6 +41,19 @@ console.log(`  call sites     ${s.callSitesTotal}`);
 console.log(`  in-repo        ${s.callSitesResolvedInRepo}  (${pct(s.callSitesResolvedInRepo)}%)`);
 console.log(`  external       ${s.callSitesExternal}  (${pct(s.callSitesExternal)}%)`);
 console.log(`  UNRESOLVED     ${s.callSitesUnresolved}  (${pct(s.callSitesUnresolved)}%)`);
+console.log(
+  `  type refs      ${s.typeRefsResolved} resolved in-repo` +
+    // Most of the remainder are React, Prisma and other library types. Those are
+    // not failures — they are simply not ours — but we do not have a cheap way to
+    // separate them from a genuine miss, so the label says both.
+    (s.typeRefsUnresolved > 0 ? `, ${s.typeRefsUnresolved} external or unresolved` : ''),
+);
+if (s.edgesDropped > 0) {
+  // Should never happen. If it does, an edge was found that could not be
+  // anchored to both ends, and saying so beats a graph that is quietly missing
+  // relationships (rule 2).
+  console.log(`  ⚠ edges dropped ${s.edgesDropped}  (endpoint node was not emitted)`);
+}
 console.log(`  took           ${s.durationMs}ms`);
 
 console.log('\n── routes ──────────────────────────────');

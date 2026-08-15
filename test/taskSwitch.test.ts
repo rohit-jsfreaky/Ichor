@@ -72,7 +72,14 @@ function fixtureFacts(): GraphFacts {
       { key: 'field:Vendor.email', model: 'Vendor', name: 'email', type: 'String', isUnique: true, isId: false },
       { key: 'field:Invoice.amount', model: 'Invoice', name: 'amount', type: 'Int', isUnique: false, isId: false },
     ],
+    types: [
+      { key: 'type:src/lib/vendors/types.ts#Vendor', name: 'Vendor', kind: 'interface',
+        file: 'src/lib/vendors/types.ts', line: 1, exported: true },
+      { key: 'type:src/lib/billing/types.ts#Invoice', name: 'Invoice', kind: 'interface',
+        file: 'src/lib/billing/types.ts', line: 1, exported: true },
+    ],
     calls: [],
+    references: [],
     touches: [],
     imports: [],
     stats: {
@@ -81,6 +88,8 @@ function fixtureFacts(): GraphFacts {
       callSitesResolvedInRepo: 0,
       callSitesExternal: 0,
       callSitesUnresolved: 0,
+      typeRefsResolved: 0,
+      typeRefsUnresolved: 0,
       durationMs: 0,
     },
   } as unknown as GraphFacts;

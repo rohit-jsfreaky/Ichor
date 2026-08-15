@@ -29,7 +29,7 @@ const STOP_WORDS = new Set([
   'properly', 'correctly', 'instead', 'also', 'just', 'need', 'needs', 'want', 'like',
 ]);
 
-export type AnchorKind = 'function' | 'route' | 'model' | 'field' | 'file';
+export type AnchorKind = 'function' | 'route' | 'model' | 'field' | 'file' | 'type';
 
 export interface Anchor {
   key: string;
@@ -174,6 +174,27 @@ export function findAnchors(
         `field matches ${hits.join(', ')}` +
         (field.isUnique ? ' (unique constraint)' : '') +
         (modelHits.length ? ` on model matching ${modelHits.join(', ')}` : ''),
+    });
+  }
+
+  // Types — interfaces, aliases, enums, classes.
+  //
+  // Weighted just under a Prisma model. Both name the SHAPE of the data a task
+  // is about, and in an app without Prisma a type is the ONLY thing that does:
+  // "add a status field to the Vendor type" had nothing to anchor to before.
+  for (const type of facts.types) {
+    const hits = terms.filter((t) => matches(t, type.name));
+    if (hits.length === 0) continue;
+
+    scored.push({
+      key: type.key,
+      kind: 'type',
+      name: type.name,
+      file: type.file,
+      // Exported types are the ones other code can be about; a local helper type
+      // is usually incidental to the task.
+      score: hits.length * 3 + (type.exported ? 1 : 0),
+      why: `${type.kind} name matches ${hits.join(', ')}`,
     });
   }
 

@@ -19,7 +19,7 @@ import { parsePrismaSchema } from './prismaSchema.js';
 import {
   HTTP_METHODS, PRISMA_OPS, PRISMA_WRITE_OPS,
   type GraphFacts, type FunctionFact, type FileFact, type RouteFact,
-  type CallEdge, type TouchEdge, type ImportEdge,
+  type CallEdge, type TouchEdge, type ImportEdge, type TypeFact, type ReferenceEdge,
 } from './types.js';
 
 const TSCONFIG_CANDIDATES = ['tsconfig.json', 'apps/web/tsconfig.json', 'packages/tsconfig.json'];
@@ -73,6 +73,28 @@ export function analyzeRepo(repoRoot: string, options: AnalyzeOptions = {}): Gra
     }
   }
 
+  // ---- types -------------------------------------------------------------
+  // Interfaces, type aliases, enums and classes. Indexed by declaration node in
+  // the SAME map as functions, so a resolved reference maps straight to a key
+  // whichever kind it turns out to be.
+  const types: TypeFact[] = [];
+
+  for (const file of sourceFiles) {
+    const filePath = rel(file);
+    for (const declared of declaredTypes(file)) {
+      const key = nodeKey('type', filePath, declared.name);
+      types.push({
+        key,
+        name: declared.name,
+        kind: declared.kind,
+        file: filePath,
+        line: declared.node.getStartLineNumber(),
+        exported: declared.exported,
+      });
+      keyByDeclaration.set(declared.node, key);
+    }
+  }
+
   // ---- imports -----------------------------------------------------------
   const imports: ImportEdge[] = [];
   for (const file of sourceFiles) {
@@ -106,7 +128,22 @@ export function analyzeRepo(repoRoot: string, options: AnalyzeOptions = {}): Gra
     if (/(^|\/)app\/.*\/route\.tsx?$/.test(filePath)) {
       for (const [name, decls] of file.getExportedDeclarations()) {
         if (!HTTP_METHODS.has(name)) continue;
-        const handlerKey = nodeKey('function', filePath, name);
+
+        // Follow the export to the declaration it actually names.
+        //
+        // A real Next.js pattern is one handler serving every verb:
+        //
+        //   const handler = async (req) => { … }
+        //   export { handler as DELETE, handler as GET, handler as POST };
+        //
+        // Keying the route off the EXPORTED name invents `#GET`, which no
+        // function node ever carries, and the resulting edge points at nothing.
+        // `getExportedDeclarations` hands back the underlying declaration, so we
+        // key off that and the route points at the real handler.
+        const declaration = decls[0];
+        const handlerKey =
+          (declaration && keyByDeclaration.get(declaration)) ??
+          nodeKey('function', filePath, name);
         routes.push({
           key: nodeKey('route', `${name} ${routePathFor(filePath)}`),
           method: name,
@@ -177,22 +214,105 @@ export function analyzeRepo(repoRoot: string, options: AnalyzeOptions = {}): Gra
     }
   }
 
+  // ---- type references ----------------------------------------------------
+  //
+  // Which function mentions which type — in a parameter, a return, an
+  // annotation, a cast. Resolved through the compiler exactly like a call, so
+  // `Vendor` here is THE `Vendor` declared over there and not merely a word that
+  // matches. Unresolved mentions are counted, never guessed (rules 1 and 2).
+  const references: ReferenceEdge[] = [];
+  let typeRefsResolved = 0;
+  let typeRefsUnresolved = 0;
+
+  for (const file of sourceFiles) {
+    const filePath = rel(file);
+
+    for (const reference of file.getDescendantsOfKind(SyntaxKind.TypeReference)) {
+      const nameNode = reference.getTypeName();
+      if (!Node.isIdentifier(nameNode)) continue;
+
+      const enclosingKey = enclosingFunctionKey(reference, keyByDeclaration);
+      if (!enclosingKey) continue; // a type used outside any function is not an edge we can anchor
+
+      const targetKey = firstRepoKey(nameNode.getDefinitionNodes(), keyByDeclaration);
+      if (!targetKey) {
+        typeRefsUnresolved++;
+        continue;
+      }
+      if (targetKey === enclosingKey) continue;
+
+      typeRefsResolved++;
+      references.push({
+        fromKey: enclosingKey,
+        toKey: targetKey,
+        file: filePath,
+        line: reference.getStartLineNumber(),
+      });
+    }
+  }
+
+  // ---- consistency --------------------------------------------------------
+  //
+  // Every edge must land on a node we actually emit. HydraDB does not skip an
+  // edge whose endpoint is missing — it rejects the whole statement with
+  // "MATCH endpoint vertex … does not exist", so ONE unusual file aborts the
+  // analysis of an entire repository. That is exactly what happened on a
+  // 1,386-file codebase, and a graph that only builds for tidy repos is not a
+  // graph anyone can rely on.
+  //
+  // Dropped edges are counted and reported rather than silently discarded
+  // (ENGINEERING-RULES rule 2).
+  const functionKeys = new Set(functions.map((f) => f.key));
+  const typeKeys = new Set(types.map((t) => t.key));
+  const modelKeys = new Set(models.map((m) => m.key));
+  const fileKeys = new Set(files.map((f) => f.key));
+
+  const callsBefore = calls.length;
+  const touchesBefore = touches.length;
+  const routesBefore = routes.length;
+  const importsBefore = imports.length;
+
+  const keptCalls = calls.filter((c) => functionKeys.has(c.fromKey) && functionKeys.has(c.toKey));
+  const keptTouches = touches.filter((t) => functionKeys.has(t.fromKey) && modelKeys.has(t.modelKey));
+  const keptRoutes = routes.filter((r) => functionKeys.has(r.handlerKey));
+  const keptImports = imports.filter(
+    (i) => fileKeys.has(i.fromFileKey) && fileKeys.has(i.toFileKey),
+  );
+  // A reference can start at a function OR a type (one interface extending
+  // another), and must land on a type we emitted.
+  const referencesBefore = references.length;
+  const keptReferences = references.filter(
+    (r) => (functionKeys.has(r.fromKey) || typeKeys.has(r.fromKey)) && typeKeys.has(r.toKey),
+  );
+
+  const edgesDropped =
+    callsBefore - keptCalls.length +
+    (touchesBefore - keptTouches.length) +
+    (routesBefore - keptRoutes.length) +
+    (importsBefore - keptImports.length) +
+    (referencesBefore - keptReferences.length);
+
   return {
     repoRoot: root,
     files,
     functions,
-    routes,
+    types,
+    routes: keptRoutes,
     models,
     fields,
-    calls,
-    touches,
-    imports,
+    calls: keptCalls,
+    references: keptReferences,
+    touches: keptTouches,
+    imports: keptImports,
     stats: {
       filesScanned: sourceFiles.length,
       callSitesTotal,
       callSitesResolvedInRepo,
       callSitesExternal,
       callSitesUnresolved,
+      typeRefsResolved,
+      typeRefsUnresolved,
+      edgesDropped,
       durationMs: Date.now() - started,
     },
   };
@@ -261,6 +381,40 @@ function declaredFunctions(file: SourceFile): DeclaredFunction[] {
     for (const method of cls.getMethods()) {
       found.push({ name: `${className}.${method.getName()}`, node: method, exported: isExported(cls) });
     }
+  }
+
+  return found;
+}
+
+interface DeclaredType {
+  name: string;
+  kind: 'interface' | 'alias' | 'enum' | 'class';
+  node: Node;
+  exported: boolean;
+}
+
+/**
+ * Named types declared at the top level of a file.
+ *
+ * Classes appear here as well as contributing their methods to
+ * `declaredFunctions` — a class is both a thing you call into and a shape you
+ * refer to, and a task can be about either.
+ */
+function declaredTypes(file: SourceFile): DeclaredType[] {
+  const found: DeclaredType[] = [];
+
+  for (const node of file.getInterfaces()) {
+    found.push({ name: node.getName(), kind: 'interface', node, exported: isExported(node) });
+  }
+  for (const node of file.getTypeAliases()) {
+    found.push({ name: node.getName(), kind: 'alias', node, exported: isExported(node) });
+  }
+  for (const node of file.getEnums()) {
+    found.push({ name: node.getName(), kind: 'enum', node, exported: isExported(node) });
+  }
+  for (const node of file.getClasses()) {
+    const name = node.getName();
+    if (name) found.push({ name, kind: 'class', node, exported: isExported(node) });
   }
 
   return found;

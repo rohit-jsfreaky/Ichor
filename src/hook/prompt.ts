@@ -232,6 +232,11 @@ async function drawBoundary(
       : saveTask(repoRoot, neighborhood, { mode, sessionId });
 
     log.push(`prompt: boundary set — ${neighborhood.members.size} functions`);
+    if (neighborhood.stats.truncated) {
+      // Rule 2: a boundary that stopped early is not the same as one that
+      // finished, and everything it did not reach will be challenged.
+      log.push(`prompt: ⚠ the task area hit the member cap — edits just outside it may be questioned`);
+    }
     return task;
   } catch (error) {
     log.push(`prompt: could not reach the graph (${(error as Error).message.slice(0, 80)})`);

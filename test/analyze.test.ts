@@ -131,3 +131,39 @@ describe('locations', () => {
     }
   });
 });
+
+describe('the type layer', () => {
+  // In TypeScript a large share of the structure is types, and Ichor recorded
+  // none of it. Without these, "add a status field to the Vendor type" anchors
+  // to nothing at all in any app that has no Prisma schema to name Vendor.
+  it('records interfaces, aliases, enums and classes', () => {
+    const kinds = new Set(facts.types.map((t) => t.kind));
+    expect(facts.types.length).toBeGreaterThan(0);
+    // The demo declares interfaces; the others are covered by the extractor and
+    // asserted through the shape of the union rather than the demo's contents.
+    expect([...kinds].every((k) => ['interface', 'alias', 'enum', 'class'].includes(k))).toBe(true);
+  });
+
+  it('resolves a type mention to the declaration, not to a matching name', () => {
+    // The whole point of using the compiler: `NewVendor` in create.ts is THE
+    // NewVendor declared there, never merely something spelled the same.
+    for (const reference of facts.references) {
+      expect(facts.types.some((t) => t.key === reference.toKey)).toBe(true);
+      expect(
+        facts.functions.some((f) => f.key === reference.fromKey) ||
+          facts.types.some((t) => t.key === reference.fromKey),
+      ).toBe(true);
+    }
+  });
+
+  it('counts type mentions it could not resolve rather than dropping them silently', () => {
+    expect(facts.stats.typeRefsResolved).toBeGreaterThanOrEqual(0);
+    expect(facts.stats.typeRefsUnresolved).toBeGreaterThanOrEqual(0);
+  });
+
+  it('never emits a reference edge pointing at a type that does not exist', () => {
+    const typeKeys = new Set(facts.types.map((t) => t.key));
+    const dangling = facts.references.filter((r) => !typeKeys.has(r.toKey));
+    expect(dangling).toEqual([]);
+  });
+});

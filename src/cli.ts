@@ -162,6 +162,10 @@ program
         maxDepth: Number(options.depth),
       });
       console.log(`${neighborhood.stats.memberCount} functions`);
+      if (neighborhood.stats.truncated) {
+        console.log('  ⚠ hit the member cap — the task area is unusually large, and edits');
+        console.log('    just outside the boundary may be questioned.');
+      }
 
       // Explicit beats inferred: naming a task by hand also stops prompt-driven
       // detection from redrawing it out from under you.

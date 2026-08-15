@@ -103,6 +103,11 @@ export function buildNameIndex(facts: GraphFacts, builtAt: string): NameIndex {
   for (const model of facts.models) {
     entries.push({ name: model.name, kind: 'model' });
   }
+  // Types matter here for the same reason they matter as anchors: in an app with
+  // no Prisma schema, "now switch to the Invoice type" names nothing otherwise.
+  for (const type of facts.types) {
+    entries.push({ name: type.name, kind: 'type', file: type.file });
+  }
   for (const field of facts.fields) {
     entries.push({ name: `${field.model}.${field.name}`, kind: 'field' });
   }

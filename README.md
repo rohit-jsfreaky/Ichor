@@ -305,9 +305,40 @@ Things found the hard way while building on it, offered back:
 - **`LIMIT` truncates silently**, so any query whose *ranking* matters has to over-fetch and rank client-side.
 - **A variable-length segment cannot start from an unbound node** — *"variable-length MATCH requires a fixed source id"*. `MATCH (c:Function)-[:CALLS*1..4]->(t:Function) WHERE t.name = $name` is rejected, because the node being pinned is the target. Anything traversing *backwards* from a known node has to pin an id and widen one hop at a time.
 - **`algo.SPpaths` is unavailable over Bolt** on this build — *"query transport cannot authorize an unsupported Cypher clause"* — so whole paths with every intermediate hop cannot be fetched, only summaries assembled from bounded traversal.
+- **`DETACH DELETE` is the bottleneck, by a wide margin.** Roughly **96ms per node**, against a 30-second statement ceiling — so a 2,265-function graph cannot be wiped at all, and even 300 nodes takes 28.8s. There is no batched alternative in the subset: `UNWIND … MATCH … DETACH DELETE` is rejected ("UNWIND batch node patterns do not support"), and `MATCH (n) WITH n LIMIT 100 DETACH DELETE n` is rejected as a non-executable write. Writes, by contrast, are quick — 500 nodes in 82ms, 500 edges in 304ms.
+- **A batch is capped at 1024 items** — "client_query_batch_items rejected by admission control".
+- **`MERGE` on a relationship with an explicit id is idempotent**, and this is what makes rebuilding viable: two identical passes leave 49 edges rather than 98. Ichor therefore never wipes. Nodes and edges both upsert, and only genuinely-deleted code is removed.
+- **`MERGE … SET` is rejected on its own** — "MERGE with following clauses is not executable" — but the same pair inside `UNWIND $rows AS row` is fine.
 - **Relationship properties need an explicit id.** `CREATE (a)-[:R {x: row.x}]->(b)` is rejected with *"UNWIND relationship CREATE properties require id: row.&lt;field&gt;"*; the edge needs its own id column before it will accept any property.
 
 The Cypher subset was never a problem in practice. Depth is close to free — the neighbourhood walk is the cheapest part of the whole pipeline.
+
+## On a real codebase
+
+The demo proves the idea; it does not prove the engineering. So Ichor was run against [papermark](https://github.com/mfts/papermark) — an open-source document-sharing product, **1,386 TypeScript files**:
+
+| | |
+|---|---|
+| functions / routes / models / fields | 2,265 · 69 · 78 · 1,213 |
+| call sites resolved | **81.8%** (18.2% unresolved — the same rate as the 11-file demo) |
+| first build | ~55s, dominated by ts-morph |
+| rebuild | ~58s |
+| task boundary | 317 functions — 14% of the repo |
+| prompt classification | under 2s |
+
+Four real bugs came out of it, none of which the demo could ever have surfaced:
+
+1. **Three of four real repos keep their Prisma schema where we did not look.** The modern multi-file layout (`prisma/schema/*.prisma`) is the default for anything large. Ichor found zero models and silently lost its whole data layer. It now walks for schema files instead of guessing paths.
+2. **One unusual file aborted the entire analysis.** A route exported as `export { handler as GET, handler as POST }` produced an edge pointing at a function node that was never created, and HydraDB rejects the whole statement when an endpoint is missing. Export aliases are now followed to the real declaration, and any edge that still cannot be anchored is dropped *and counted*.
+3. **The boundary swallowed 56% of the repository.** Walking *inward* — to everything that calls the task's code — is what exploded: 804 of 1,271 members arrived that way, because every shared helper has hundreds of callers. Outward and inward are no longer symmetric, which brought it to 14%.
+4. **Rebuilding was impossible.** See the delete numbers above. Switching to idempotent upserts removed the need to delete at all.
+
+**One codebase per database.** Nodes are keyed by repo-relative path, so two repositories with a `src/lib/db.ts` each would collide, and the previous repo's graph is far too large to remove in place. Pointing Ichor at a second repo therefore fails with the fix rather than quietly answering about a mixture of two codebases:
+
+```
+This HydraDB already holds the graph for /path/to/first-repo.
+For a clean graph:  ichor down --wipe && ichor up
+```
 
 ## What it cannot do — please read
 
@@ -318,7 +349,8 @@ The Cypher subset was never a problem in practice. Depth is close to free — th
 - **The graph is rebuilt between turns, not during them.** While the agent works, new code it writes is tracked as a weaker, name-based hint — good enough to see that a new file connects to something it just created, never good enough to be quoted as evidence. The compiled graph is rebuilt when the agent stops talking. So within a single turn the graph can be a few edits behind.
 - **Task detection can be wrong.** It moves the boundary only when a prompt points somewhere the boundary does not cover, and anything ambiguous — "continue", a pasted stack trace, a question — changes nothing. `ichor status` always shows what it decided, and `ichor start` overrides it.
 - **One conversation at a time per repo.** Task state is per-repo, so two agent sessions in the same checkout share one boundary; the newer session takes it over. Per-session isolation is not built.
-- **One repo at a time.** Every rebuild wipes the graph and rewrites it, so a single local HydraDB holds one codebase at a time. Watching a second repo replaces the first — go back to it and `ichor watch` again.
+- **One codebase per database.** Pointing Ichor at a second repo fails with instructions rather than mixing two graphs — see [On a real codebase](#on-a-real-codebase).
+- **Analysis is the slow part.** ~1.6s on the demo, ~55s on a 1,386-file repo. It runs detached between turns, so it never blocks you, but on a large codebase the graph trails the code by about a minute.
 - **Ichor can be wrong.** When it cannot validate a justification it asks you, rather than deciding for you.
 
 ## Roadmap

@@ -23,21 +23,56 @@ export interface PrismaSchema {
   schemaPath?: string;
 }
 
-const CANDIDATE_PATHS = [
-  'prisma/schema.prisma',
-  'schema.prisma',
-  'src/prisma/schema.prisma',
-  'apps/web/prisma/schema.prisma',
-  'packages/db/prisma/schema.prisma',
-];
+/** Never worth walking into, and `migrations` holds SQL, not schema. */
+const SKIP_DIRS = new Set([
+  'node_modules', 'migrations', 'dist', 'build', 'out', '.next', 'coverage', 'generated',
+]);
 
-/** Locate schema.prisma, or undefined if this repo does not use Prisma. */
+/** Deep enough for `apps/web/prisma/schema/`, shallow enough to stay cheap. */
+const MAX_DEPTH = 4;
+
+/**
+ * Find every `.prisma` file in the repo.
+ *
+ * A fixed list of candidate paths is what this used to be, and it was wrong for
+ * three of the four real codebases we tested against. Prisma's multi-file layout
+ * — `prisma/schema/*.prisma`, one file per domain — is the modern default for
+ * anything large, and monorepos scatter the schema anywhere: `packages/prisma/`,
+ * `apps/web/prisma/schema/`. Missing it fails SILENTLY: no models, no data
+ * anchors, and a task boundary quietly missing the layer that makes test 2 work.
+ *
+ * So: walk and collect. `.prisma` files are rare, and the skip list keeps it cheap.
+ */
+export function findSchemas(repoRoot: string): string[] {
+  const found: string[] = [];
+
+  const walk = (dir: string, depth: number): void => {
+    if (depth > MAX_DEPTH) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // unreadable directory is not a reason to fail the analysis
+    }
+
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
+        walk(full, depth + 1);
+      } else if (entry.name.endsWith('.prisma')) {
+        found.push(full);
+      }
+    }
+  };
+
+  walk(repoRoot, 0);
+  return found.sort();
+}
+
+/** The first schema found, for callers that only want to report a location. */
 export function findSchema(repoRoot: string): string | undefined {
-  for (const rel of CANDIDATE_PATHS) {
-    const full = path.join(repoRoot, rel);
-    if (fs.existsSync(full)) return full;
-  }
-  return undefined;
+  return findSchemas(repoRoot)[0];
 }
 
 /**
@@ -47,12 +82,16 @@ export function findSchema(repoRoot: string): string | undefined {
  * a useful call graph, it just has no model layer.
  */
 export function parsePrismaSchema(repoRoot: string): PrismaSchema {
-  const schemaPath = findSchema(repoRoot);
-  if (!schemaPath) return { models: [], fields: [] };
+  const schemaPaths = findSchemas(repoRoot);
+  if (schemaPaths.length === 0) return { models: [], fields: [] };
 
-  const source = fs.readFileSync(schemaPath, 'utf8');
+  const source = schemaPaths.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
   const models: ModelFact[] = [];
   const fields: FieldFact[] = [];
+  // Split schemas can repeat a model across files. Node ids are derived from the
+  // key, so a duplicate would not collide — it would quietly write the same node
+  // twice and duplicate every HAS_FIELD edge, which `CREATE` does not dedupe.
+  const seen = new Set<string>();
 
   // `model Vendor {  ...  }` — non-greedy body, closing brace at column 0.
   const modelBlock = /^model\s+(\w+)\s*\{([\s\S]*?)^\}/gm;
@@ -61,7 +100,10 @@ export function parsePrismaSchema(repoRoot: string): PrismaSchema {
     const modelName = match[1];
     const body = match[2];
 
-    models.push({ key: nodeKey('model', modelName), name: modelName });
+    const modelKey = nodeKey('model', modelName);
+    if (seen.has(modelKey)) continue;
+    seen.add(modelKey);
+    models.push({ key: modelKey, name: modelName });
 
     for (const rawLine of body.split('\n')) {
       const line = stripComment(rawLine).trim();
@@ -73,8 +115,12 @@ export function parsePrismaSchema(repoRoot: string): PrismaSchema {
 
       const [, fieldName, fieldType, attributes] = field;
 
+      const fieldKey = nodeKey('field', `${modelName}.${fieldName}`);
+      if (seen.has(fieldKey)) continue;
+      seen.add(fieldKey);
+
       fields.push({
-        key: nodeKey('field', `${modelName}.${fieldName}`),
+        key: fieldKey,
         model: modelName,
         name: fieldName,
         type: fieldType,
@@ -84,7 +130,7 @@ export function parsePrismaSchema(repoRoot: string): PrismaSchema {
     }
   }
 
-  return { models, fields, schemaPath };
+  return { models, fields, schemaPath: schemaPaths[0] };
 }
 
 /** Drop a trailing `//` comment without mangling a `//` inside a string. */

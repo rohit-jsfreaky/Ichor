@@ -301,6 +301,7 @@ export function toNeighborhood(task: PersistedTask): Neighborhood {
       memberCount: members.size,
       maxDistance: Math.max(0, ...task.members.map((m) => m.distance)),
       queryCount: 0,
+      truncated: false,
       durationMs: 0,
     },
   };

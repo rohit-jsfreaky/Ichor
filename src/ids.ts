@@ -59,7 +59,7 @@ export function hashId(key: string): number {
 }
 
 /** The kinds of node Ichor puts in the graph. Part of the key, so namespaces cannot clash. */
-export type NodeKind = 'function' | 'route' | 'model' | 'field' | 'file';
+export type NodeKind = 'function' | 'route' | 'model' | 'field' | 'file' | 'type';
 
 /**
  * Build the canonical key for a node.

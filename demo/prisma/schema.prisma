@@ -1,0 +1,52 @@
+// Demo app schema. SQLite so the app runs with no database to install.
+//
+// The important line for the whole Ichor demo is `email String @unique` on
+// Vendor: the uniqueness rule ALREADY EXISTS at the database level. That is why
+// a separate /api/vendors/check-email endpoint is redundant — the submit path
+// already reaches this constraint.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Vendor {
+  id        Int      @id @default(autoincrement())
+  company   String
+  name      String
+  email     String   @unique // <- the uniqueness check the submit path already hits
+  address   String?
+  phone     String?
+  createdAt DateTime @default(now())
+
+  invoices Invoice[]
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  sessions Session[]
+}
+
+model Session {
+  id        String   @id
+  userId    Int
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model Invoice {
+  id       Int      @id @default(autoincrement())
+  vendorId Int
+  amount   Int
+  paid     Boolean  @default(false)
+  issuedAt DateTime @default(now())
+  vendor   Vendor   @relation(fields: [vendorId], references: [id])
+}

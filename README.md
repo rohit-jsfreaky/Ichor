@@ -140,7 +140,7 @@ Watching. Run your agent as usual.
 | Agent | Level | How |
 |---|---|---|
 | **Claude Code** | Full | `PreToolUse` hook — challenges *before* the edit is written |
-| **Codex CLI** | Full | `PreToolUse` hook — same mechanism, same decisions |
+| **Codex CLI** | Full | `PreToolUse` hook — same mechanism, same decisions ([one caveat](#codex-hooks-need-an-interactive-session)) |
 | Cursor · Windsurf · Gemini CLI · Cline | Coming soon | Same adapter interface |
 
 Supporting two agents cost an afternoon rather than a week because they accept an identical decision payload:
@@ -152,7 +152,20 @@ Supporting two agents cost an afternoon rather than a week because they accept a
     "permissionDecisionReason": "…" } }
 ```
 
-Only the config location and the edit payload differ — Claude Code reports `tool_input.file_path`, Codex reports an `apply_patch` envelope. Both are normalised in [`src/hook/input.ts`](src/hook/input.ts), which is the entire adapter layer.
+The config files are now byte-identical; only their paths differ. What differs is the edit payload: Claude Code reports one `tool_input.file_path` per call, while Codex reports an `apply_patch` envelope that can carry **several files in a single hook invocation**. A real Codex run classified four files in one call in 4ms. Both shapes are normalised in [`src/hook/input.ts`](src/hook/input.ts), which is the entire adapter layer.
+
+### Codex hooks need an interactive session
+
+Codex asks you to review and trust a hook file the first time it sees one, and `codex exec` cannot show that prompt — so in non-interactive mode it starts, edits, and **runs no hooks at all**, with nothing printed to say so.
+
+That is Codex's behaviour, not Ichor's, but it is worth knowing before you conclude the integration is broken:
+
+```bash
+codex          # hooks run — approve the trust prompt on first use
+codex exec …   # hooks are skipped, silently
+```
+
+Verified against Codex CLI 0.147.0, from both `<repo>/.codex/hooks.json` and `~/.codex/hooks.json`, with a `.*` matcher, on a trusted project, with `hooks` reported as a stable enabled feature.
 
 Both agents also get an **MCP server**, so the agent can ask why something was flagged and argue its case instead of simply being refused:
 

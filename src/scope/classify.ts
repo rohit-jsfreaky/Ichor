@@ -188,10 +188,16 @@ export async function classify(intent: ChangeIntent, deps: ClassifyDeps): Promis
   const duplicate = await findDuplicateFlow(pending, deps);
   if (duplicate) {
     evidence.push({ kind: 'existing-flow', text: duplicate.existingPath });
+    // Say HOW it reaches the model. Routing through a service instead of the
+    // database client is good practice, and an agent told it "reaches Vendor"
+    // when its file contains no query would rightly think Ichor was confused.
+    const reaches = duplicate.viaFile
+      ? `reaches ${duplicate.model} through ${duplicate.viaFile}`
+      : `reaches ${duplicate.model}`;
     return {
       decision: 'SUSPICIOUS',
       reason:
-        `${intent.file} introduces a new ${duplicate.newFlowKind} that reaches ${duplicate.model}, ` +
+        `${intent.file} introduces a new ${duplicate.newFlowKind} that ${reaches}, ` +
         `but the task's existing path already reaches it: ${duplicate.existingPath}.`,
       evidence,
       question:
@@ -330,7 +336,18 @@ interface DuplicateFlow {
   existingEntry: string;
   existingPath: string;
   constraintNote: string;
+  /** Set when the new route reaches the model through a file it imports. */
+  viaFile?: string;
 }
+
+/** A model the pending file reaches, and whether it does so directly. */
+interface PendingReach {
+  model: string;
+  viaFile?: string;
+}
+
+/** HTTP methods that change data, and so are where a constraint gets enforced. */
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 /**
  * TEST 2 — the new-flow test.
@@ -347,11 +364,13 @@ async function findDuplicateFlow(
   deps: ClassifyDeps,
 ): Promise<DuplicateFlow | undefined> {
   if (pending.routeMethods.length === 0) return undefined; // not a new entry point
-  if (pending.touches.length === 0) return undefined;      // reaches no data
 
   const { neighborhood, client } = deps;
 
-  for (const touch of pending.touches) {
+  const reached = await pendingReaches(pending, deps);
+  if (reached.length === 0) return undefined; // reaches no data
+
+  for (const touch of reached) {
     const taskModel = [...neighborhood.models.values()].find(
       (m) => m.name.toLowerCase() === touch.model.toLowerCase(),
     );
@@ -378,30 +397,9 @@ async function findDuplicateFlow(
     });
     if (candidates.length === 0) continue;
 
-    // Several existing routes can reach the same model, and the row order is the
-    // database's, not ours. Prefer the one that argues best: a route using the
-    // SAME METHOD as the pending file is the closest analogue of what the agent
-    // just wrote, so citing "GET /api/vendors" against a new POST is a weaker
-    // sentence than citing the existing POST. The path/handler tie-break keeps
-    // the message identical run to run, which matters when a developer compares
-    // two challenges.
-    const wantsMethod = new Set(pending.routeMethods.map((m) => m.toUpperCase()));
-    const inScope = candidates.sort((a, b) => {
-      const aMatch = wantsMethod.has(String(a.get('method')).toUpperCase()) ? 0 : 1;
-      const bMatch = wantsMethod.has(String(b.get('method')).toUpperCase()) ? 0 : 1;
-      if (aMatch !== bMatch) return aMatch - bMatch;
-      const byPath = String(a.get('path')).localeCompare(String(b.get('path')));
-      if (byPath !== 0) return byPath;
-      return String(a.get('handler')).localeCompare(String(b.get('handler')));
-    })[0];
-
-    const method = String(inScope.get('method'));
-    const routePath = String(inScope.get('path'));
-    const handler = String(inScope.get('handler'));
-    const reacher = String(inScope.get('reacher'));
-
     // If the model has a unique constraint on a field the task named, say so —
-    // it is usually the whole reason the extra endpoint is unnecessary.
+    // it is usually the whole reason the extra endpoint is unnecessary. Fetched
+    // BEFORE the ranking, because it changes which route argues best.
     const uniqueRows = await client.run(
       `MATCH (m:Model)-[:HAS_FIELD]->(f:Field)
          WHERE m.name = $model AND f.isUnique = true
@@ -412,6 +410,45 @@ async function findDuplicateFlow(
       .map((r) => String(r.get('name')))
       .filter((name) => neighborhood.terms.some((t) => name.toLowerCase().includes(t)));
 
+    // Several existing routes reach the same model and the row order is the
+    // database's, not ours — so pick the one that makes the strongest argument.
+    //
+    // Which route that is depends on what we are arguing:
+    //
+    //   With a unique constraint, the claim is "this rule is ALREADY ENFORCED",
+    //   and enforcement happens where the data is written. Citing a read route
+    //   invites the obvious rebuttal, and a real Claude Code run gave exactly
+    //   that one: told its new check-email endpoint duplicated GET /api/vendors,
+    //   it answered that listing every vendor to ask about one address would be
+    //   worse — and it was right. The route to cite was POST /api/vendors, which
+    //   enforces the constraint and already answers with a 409.
+    //
+    //   Without a constraint, the claim is "this door already exists", and the
+    //   closest analogue is a route using the same method as the pending file.
+    //
+    // The path/handler tie-break keeps the message identical run to run.
+    const wantsMethod = new Set(pending.routeMethods.map((m) => m.toUpperCase()));
+    const argueFromEnforcement = uniqueFields.length > 0;
+
+    const rank = (record: (typeof candidates)[number]): number => {
+      const method = String(record.get('method')).toUpperCase();
+      if (argueFromEnforcement) return MUTATING_METHODS.has(method) ? 0 : 1;
+      return wantsMethod.has(method) ? 0 : 1;
+    };
+
+    const inScope = candidates.sort((a, b) => {
+      const byRank = rank(a) - rank(b);
+      if (byRank !== 0) return byRank;
+      const byPath = String(a.get('path')).localeCompare(String(b.get('path')));
+      if (byPath !== 0) return byPath;
+      return String(a.get('handler')).localeCompare(String(b.get('handler')));
+    })[0];
+
+    const method = String(inScope.get('method'));
+    const routePath = String(inScope.get('path'));
+    const handler = String(inScope.get('handler'));
+    const reacher = String(inScope.get('reacher'));
+
     return {
       newFlowKind: `${pending.routeMethods.join('/')} endpoint at ${pending.routePath}`,
       model: taskModel.name,
@@ -420,8 +457,57 @@ async function findDuplicateFlow(
       constraintNote: uniqueFields.length
         ? `, where ${taskModel.name}.${uniqueFields[0]} is already unique`
         : '',
+      viaFile: touch.viaFile,
     };
   }
 
   return undefined;
+}
+
+/**
+ * What data does the pending file reach?
+ *
+ * Prisma calls written directly in the file are the easy case. The case that
+ * matters is the polite one: an agent that adds a helper to an existing service
+ * and calls THAT from its new route touches no database client at all, so the
+ * literal parse sees nothing and a new entry point walks straight through.
+ * A real Claude Code run did exactly this — it added `isVendorEmailTaken` to
+ * the vendor service, then wrote a route that only called it.
+ *
+ * So when the file touches nothing directly, ask the graph what the files it
+ * imports already reach. The new helper itself is not in the graph — it was
+ * written seconds ago — but the file it was added to is, and that is enough.
+ */
+async function pendingReaches(
+  pending: PendingFacts,
+  deps: ClassifyDeps,
+): Promise<PendingReach[]> {
+  if (pending.touches.length > 0) {
+    return pending.touches.map((touch) => ({ model: touch.model }));
+  }
+
+  const found: PendingReach[] = [];
+  const seen = new Set<string>();
+
+  for (const imported of pending.importsRepoFiles) {
+    // parsePending strips the extension; the graph stores the real filename.
+    const candidates = [`${imported}.ts`, `${imported}.tsx`, `${imported}/index.ts`];
+
+    const rows = await deps.client.run(
+      `MATCH (f:File)-[:DECLARES]->(fn:Function)-[:TOUCHES]->(m:Model)
+         WHERE f.path = $a OR f.path = $b OR f.path = $c
+         RETURN m.name AS model, f.path AS file
+         LIMIT 50`,
+      { a: candidates[0], b: candidates[1], c: candidates[2] },
+    );
+
+    for (const record of rows.records) {
+      const model = String(record.get('model'));
+      if (seen.has(model)) continue;
+      seen.add(model);
+      found.push({ model, viaFile: String(record.get('file')) });
+    }
+  }
+
+  return found;
 }

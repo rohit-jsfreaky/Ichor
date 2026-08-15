@@ -138,10 +138,16 @@ function installCodex(repoRoot: string, messages: string[]): boolean {
     return true;
   }
 
+  // The SAME nested shape as Claude Code, not a flattened one.
+  //
+  // Codex reads `<repo>/.codex/hooks.json` happily, but each PreToolUse entry
+  // must carry its own `hooks` ARRAY. An entry with `type`/`command` hoisted to
+  // the top level parses without complaint and then runs nothing at all — Codex
+  // edited a whole repo unpoliced with no error anywhere. Silent, which is the
+  // worst possible failure for a tool whose entire job is to speak up.
   preToolUse.push({
     matcher: MATCHER,
-    type: 'command',
-    command: COMMAND,
+    hooks: [{ type: 'command', command: COMMAND }],
   });
 
   writeJson(file, { ...config, hooks: { ...hooks, PreToolUse: preToolUse } });

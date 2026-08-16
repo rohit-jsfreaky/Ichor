@@ -33,6 +33,7 @@ import { classify } from '../src/scope/classify.js';
 import { parsePending } from '../src/scope/pending.js';
 import { askJudge, formatOpinion, type JudgeDecision } from '../src/judge/judge.js';
 import { judgeConfigFromEnv, isJudgeAvailable } from '../src/judge/openrouter.js';
+import { repoIdFor } from '../src/ids.js';
 
 const REPO = path.resolve('./demo');
 const TASK =
@@ -113,7 +114,7 @@ async function main() {
 
       const verdict = await classify(
         { operation: 'create', file: testCase.file, content: testCase.content },
-        { client, neighborhood, pending: testCase.content ? parsePending(testCase.file, testCase.content) : undefined },
+        { client, neighborhood, repo: repoIdFor(REPO), pending: testCase.content ? parsePending(testCase.file, testCase.content) : undefined },
       );
 
       const opinion = await askJudge(

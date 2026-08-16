@@ -16,7 +16,7 @@
  */
 
 import { GraphClient, gInt } from './client.js';
-import { IdRegistry } from '../ids.js';
+import { IdRegistry, repoIdFor, hashId } from '../ids.js';
 import type { GraphFacts } from '../extract/types.js';
 
 /**
@@ -53,6 +53,16 @@ export async function writeGraph(
   const progress = options.onProgress ?? (() => {});
   const ids = new IdRegistry();
 
+  /**
+   * Which project every node belongs to.
+   *
+   * Repo-scoped KEYS already make two projects' nodes distinct, so ids can never
+   * collide. This property is the second half of the job: it is what lets a
+   * query with an UNBOUND pattern — "every Function called `handler`" — stay
+   * inside one project. Keys stop collisions; this stops bleed.
+   */
+  const repo = repoIdFor(facts.repoRoot);
+
   let nodesWritten = 0;
   let edgesWritten = 0;
   let statements = 0;
@@ -69,8 +79,8 @@ export async function writeGraph(
   // ---- nodes ------------------------------------------------------------
   progress(`writing ${facts.files.length} files`);
   await runBatched(
-    facts.files.map((f) => ({ vertex: gInt(ids.idFor(f.key)), path: f.path })),
-    `UNWIND $rows AS row MERGE (n {id: row.vertex}) SET n:File, n.path = row.path`,
+    facts.files.map((f) => ({ vertex: gInt(ids.idFor(f.key)), path: f.path, repo })),
+    `UNWIND $rows AS row MERGE (n {id: row.vertex}) SET n:File, n.path = row.path, n.repo = row.repo`,
   );
   nodesWritten += facts.files.length;
 
@@ -78,16 +88,28 @@ export async function writeGraph(
   await runBatched(
     facts.functions.map((fn) => ({
       vertex: gInt(ids.idFor(fn.key)),
+      repo,
       name: fn.name,
       file: fn.file,
       line: gInt(fn.line),
       exported: fn.exported,
       isComponent: fn.isComponent,
       isTest: fn.isTest,
+      // The outermost declaration this function lives in — `VendorForm` for
+      // `VendorForm.handleSubmit`, and its own name for a top-level function.
+      //
+      // This is what "how many places use this" has to be counted over. A
+      // component with three handlers that each mention a type is ONE place
+      // using it, not three, and counting the nodes instead made `LinkWithViews`
+      // look like a 43-user shared shape rather than the 22-user subject it is —
+      // which got it discarded as furniture, leaving a task with no boundary
+      // at all and therefore every edit challenged.
+      root: `${fn.file}#${fn.name.split('.')[0]}`,
     })),
     `UNWIND $rows AS row MERGE (n {id: row.vertex})
        SET n:Function, n.name = row.name, n.file = row.file, n.line = row.line,
-           n.exported = row.exported, n.isComponent = row.isComponent, n.isTest = row.isTest`,
+           n.exported = row.exported, n.isComponent = row.isComponent,
+           n.isTest = row.isTest, n.root = row.root, n.repo = row.repo`,
   );
   nodesWritten += facts.functions.length;
 
@@ -95,6 +117,7 @@ export async function writeGraph(
   await runBatched(
     facts.types.map((t) => ({
       vertex: gInt(ids.idFor(t.key)),
+      repo,
       name: t.name,
       file: t.file,
       line: t.line,
@@ -102,7 +125,7 @@ export async function writeGraph(
       exported: t.exported,
     })),
     `UNWIND $rows AS row MERGE (n {id: row.vertex})
-       SET n:Type, n.name = row.name, n.file = row.file, n.line = row.line,
+       SET n:Type, n.repo = row.repo, n.name = row.name, n.file = row.file, n.line = row.line,
            n.kind = row.kind, n.exported = row.exported`,
   );
   nodesWritten += facts.types.length;
@@ -111,24 +134,26 @@ export async function writeGraph(
   await runBatched(
     facts.routes.map((r) => ({
       vertex: gInt(ids.idFor(r.key)),
+      repo,
       method: r.method,
       path: r.path,
       file: r.file,
       line: gInt(r.line),
     })),
     `UNWIND $rows AS row MERGE (n {id: row.vertex})
-       SET n:Route, n.method = row.method, n.path = row.path, n.file = row.file, n.line = row.line`,
+       SET n:Route, n.repo = row.repo, n.method = row.method, n.path = row.path, n.file = row.file, n.line = row.line`,
   );
   nodesWritten += facts.routes.length;
 
   progress(`writing ${facts.models.length} models and ${facts.fields.length} fields`);
   await runBatched(
-    facts.models.map((m) => ({ vertex: gInt(ids.idFor(m.key)), name: m.name })),
-    `UNWIND $rows AS row MERGE (n {id: row.vertex}) SET n:Model, n.name = row.name`,
+    facts.models.map((m) => ({ vertex: gInt(ids.idFor(m.key)), name: m.name, repo })),
+    `UNWIND $rows AS row MERGE (n {id: row.vertex}) SET n:Model, n.name = row.name, n.repo = row.repo`,
   );
   await runBatched(
     facts.fields.map((f) => ({
       vertex: gInt(ids.idFor(f.key)),
+      repo,
       name: f.name,
       model: f.model,
       type: f.type,
@@ -136,7 +161,7 @@ export async function writeGraph(
       isId: f.isId,
     })),
     `UNWIND $rows AS row MERGE (n {id: row.vertex})
-       SET n:Field, n.name = row.name, n.model = row.model, n.type = row.type,
+       SET n:Field, n.repo = row.repo, n.name = row.name, n.model = row.model, n.type = row.type,
            n.isUnique = row.isUnique, n.isId = row.isId`,
   );
   nodesWritten += facts.models.length + facts.fields.length;
@@ -168,10 +193,25 @@ export async function writeGraph(
     edge_id: gInt(ids.idFor(`edge:${label}:${fromKey}->${toKey}`)),
   });
 
+  // `render` distinguishes `<Child />` from `child()`. Both are real edges and
+  // both belong on CALLS — the alternative, a separate RENDERS relationship, is
+  // not available here: this engine rejects `-[:CALLS|RENDERS]->`, so every query
+  // that legitimately wants both directions of dependency could never rejoin them.
+  //
+  // It is written on EVERY row, never left absent, because `WHERE NOT c.render`
+  // is also unsupported — `{render: false}` is the only way to ask for real calls,
+  // and that matches nothing on rows where the property was omitted.
   progress(`writing ${facts.calls.length} CALLS edges`);
   await runBatched(
-    facts.calls.map((c) => edgeRow('CALLS', c.fromKey, c.toKey)),
-    edge('CALLS', 'Function', 'Function'),
+    facts.calls.map((c) => ({
+      ...edgeRow('CALLS', c.fromKey, c.toKey),
+      render: c.viaRender === true,
+      contains: c.viaContains === true,
+    })),
+    `UNWIND $rows AS row
+       MATCH (s:Function {id: row.source_vertex}), (d:Function {id: row.destination_vertex})
+       MERGE (s)-[c:CALLS {id: row.edge_id}]->(d)
+       SET c.render = row.render, c.contains = row.contains`,
   );
   edgesWritten += facts.calls.length;
 
@@ -277,45 +317,31 @@ export async function writeGraph(
 /** How many stale nodes we are willing to remove before saying it is too many. */
 const MAX_PRUNE = 150;
 
-/** Fixed id for the single marker node recording which repo this graph holds. */
-const GRAPH_MARKER_ID = 1;
-
 /**
- * Refuse to write a second repository into the same graph.
+ * Register this repository in the graph.
  *
- * One local HydraDB holds one codebase. Nodes are keyed by repo-RELATIVE path,
- * so two repos with a `src/lib/db.ts` each collide onto the same node, and the
- * leftovers from the previous repo are far too many to delete inside the query
- * timeout. The result is a graph that answers confidently about a mixture of two
- * codebases — a wrong answer, which is worse than a crash (rule 2).
+ * This used to REFUSE a second repository outright, because nodes were keyed by
+ * repo-RELATIVE path: two projects each containing a `src/lib/db.ts` collided
+ * onto one node, and `model:User` collided across any two projects at all. A
+ * graph that answers confidently about a mixture of two codebases is a wrong
+ * answer, which is worse than a crash — so the refusal was right at the time.
+ *
+ * Keys now carry the repository (see ids.ts), so the collision cannot happen and
+ * projects simply coexist. One marker per repo, and its id is derived from the
+ * repo rather than fixed, so two markers never overwrite each other.
  */
 async function claimGraph(client: GraphClient, repoRoot: string): Promise<void> {
   const normalised = repoRoot.replace(/\\/g, '/').replace(/\/$/, '');
-
-  const rows = await client.run(
-    'MATCH (m:IchorGraph) RETURN m.repoRoot AS repoRoot LIMIT 1',
-    {},
-  );
-  const held = rows.records[0]?.get('repoRoot');
-
-  if (typeof held === 'string' && held && held !== normalised) {
-    throw new Error(
-      `This HydraDB already holds the graph for ${held}.
-` +
-        `Ichor keeps one codebase per database, and the old one cannot be removed ` +
-        `in place — deletes are far too slow on this engine.
-
-` +
-        `For a clean graph:  ichor down --wipe && ichor up`,
-    );
-  }
+  const repo = repoIdFor(repoRoot);
 
   // Wrapped in UNWIND because a bare `MERGE … SET` is rejected — "MERGE with
   // following clauses is not executable" — while the same pair inside an UNWIND
   // is fine, which is how every node in this file is written.
   await client.run(
-    'UNWIND $rows AS row MERGE (m {id: row.vertex}) SET m:IchorGraph, m.repoRoot = row.repoRoot',
-    { rows: [{ vertex: gInt(GRAPH_MARKER_ID), repoRoot: normalised }] },
+    'UNWIND $rows AS row MERGE (m {id: row.vertex}) SET m:IchorGraph, m.repoRoot = row.repoRoot, m.repo = row.repo',
+    {
+      rows: [{ vertex: gInt(hashId(`ichor:graph:${repo}`)), repoRoot: normalised, repo }],
+    },
   );
 }
 
@@ -338,8 +364,15 @@ async function prune(
   let skipped = 0;
   let statements = 0;
 
+  // Scoped to this repository. Without the filter, watching a second project
+  // would see every node of the first as "stale" and try to delete the lot.
+  const repo = repoIdFor(facts.repoRoot);
+
   for (const [label, keep] of expected) {
-    const rows = await client.run(`MATCH (n:${label}) RETURN n.id AS id`, {});
+    const rows = await client.run(
+      `MATCH (n:${label}) WHERE n.repo = $repo RETURN n.id AS id`,
+      { repo },
+    );
     statements++;
 
     const stale = rows.records

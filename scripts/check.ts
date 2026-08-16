@@ -19,6 +19,7 @@ import { buildNeighborhood } from '../src/scope/neighborhood.js';
 import { classify, type ChangeIntent, type Verdict } from '../src/scope/classify.js';
 import { parsePending } from '../src/scope/pending.js';
 import { GraphClient, configFromEnv } from '../src/graph/client.js';
+import { repoIdFor } from '../src/ids.js';
 
 const REPO = path.resolve('./demo');
 const TASK =
@@ -152,7 +153,7 @@ async function main() {
       const pending = scenario.intent.content
         ? parsePending(scenario.intent.file, scenario.intent.content)
         : undefined;
-      const verdict = await classify(scenario.intent, { client, neighborhood, pending });
+      const verdict = await classify(scenario.intent, { client, neighborhood, pending, repo: repoIdFor(REPO) });
       if (show(verdict, scenario.expect)) passed++;
       else console.log(`        expected ${scenario.expect}`);
       console.log('');
@@ -195,7 +196,7 @@ async function main() {
     let switchedPassed = 0;
     for (const scenario of AFTER) {
       console.log(`${scenario.label}`);
-      const verdict = await classify(scenario.intent, { client, neighborhood: switched });
+      const verdict = await classify(scenario.intent, { client, neighborhood: switched, repo: repoIdFor(REPO) });
       if (show(verdict, scenario.expect)) switchedPassed++;
       else console.log(`        expected ${scenario.expect}`);
       console.log('');

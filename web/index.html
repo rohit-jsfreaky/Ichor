@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Ichor — make every scope expansion explicit</title>
-<meta name="description" content="Ichor keeps AI coding agents inside the job you actually asked for. It builds a graph of your codebase in HydraDB, works out where a task belongs, and challenges the agent when the work expands beyond it." />
-<meta property="og:title" content="Ichor — make every scope expansion explicit" />
-<meta property="og:description" content="Claude knows how to code. Ichor makes sure every expansion beyond the task has a reason." />
+<title>Ichor — you asked for three files, it changed twenty</title>
+<meta name="description" content="You asked for three files. It changed twenty. Ichor watches your AI coding agent while it works and challenges it the moment it goes past the job you gave it." />
+<meta property="og:title" content="Ichor — you asked for three files, it changed twenty" />
+<meta property="og:description" content="Ichor watches your AI coding agent while it works and challenges it the moment it goes past the job you gave it. Measured on 30 real commits from a real product." />
 <meta property="og:type" content="website" />
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -167,6 +167,11 @@
     letter-spacing: .12em; margin-bottom: 14px; display: block;
   }
 
+  /* A measured number, large enough to be the point of the card. */
+  .stat { font-family: var(--mono); font-size: 40px; line-height: 1.05; color: var(--acid); letter-spacing: -.02em; }
+  .stat .was { color: var(--faint); font-size: 22px; text-decoration: line-through; margin-right: 10px; }
+  .stat-note { margin-top: 10px; color: var(--dim); font-size: 14px; }
+
   /* verdict states */
   .states { display: grid; gap: 10px; }
   .state {
@@ -220,6 +225,7 @@
       <a href="#how">How it works</a>
       <a href="#allday">All day</a>
       <a href="#agents">Agents</a>
+      <a href="#proof">Proof</a>
       <a href="#install">Install</a>
       <a class="keep" href="https://github.com/rohit-jsfreaky/ichor">GitHub</a>
     </nav>
@@ -231,10 +237,10 @@
   <!-- ------------------------------------------------------------ hero -->
   <div class="shell hero">
     <div class="banner">Built on HydraDB for Hack Hydra 2026 →</div>
-    <h1>Make Every Scope<br />Expansion Explicit.</h1>
+    <h1>You Asked For Three Files.<br />It Changed Twenty.</h1>
     <p class="lede">
-      You ask for a small fix. The agent adds an endpoint, invents an abstraction, and touches
-      twenty files. Ichor notices while the agent is still working — and asks it why.
+      Ichor watches your AI coding agent while it works, and challenges it the moment it goes past
+      the job you actually gave it — not at review time, when the twenty files are already written.
     </p>
     <div class="cta">
       <a class="btn btn-primary" href="#install">Get started</a>
@@ -498,11 +504,57 @@
     </div>
   </section>
 
+  <!-- ---------------------------------------------------------- proof -->
+  <section id="proof">
+    <div class="shell">
+      <div class="section-head">
+        <span class="eyebrow">07 / Proof</span>
+        <h2>Measured On Somebody Else's Code.</h2>
+        <p>
+          A tool that questions work you were right to do gets uninstalled the same afternoon. So
+          that is the thing worth measuring — and passing your own tests on your own demo proves
+          nothing about it.
+        </p>
+      </div>
+
+      <div class="grid grid-3">
+        <div class="card">
+          <span class="num">FALSE ALARMS</span>
+          <div class="stat"><span class="was">62.7%</span>19.3%</div>
+          <p class="stat-note">Share of edits a developer genuinely had to make that Ichor would have interrupted. The first number is where this started.</p>
+        </div>
+        <div class="card">
+          <span class="num">EVIDENCE</span>
+          <div class="stat">30</div>
+          <p class="stat-note">Real commits from a real product, replayed through the real classifier. Each commit message is the task; the files it changed are the truth.</p>
+        </div>
+        <div class="card">
+          <span class="num">SPEED</span>
+          <div class="stat">5s</div>
+          <p class="stat-note">To catch up after you edit a file in a 4,975-file codebase. A first full read of that repo takes 35 seconds.</p>
+        </div>
+      </div>
+
+      <p style="margin-top:26px;color:var(--dim);font-size:15px;max-width:760px;line-height:1.6">
+        That first measurement is why this section exists. Ten-out-of-ten on an eleven-file demo was
+        hiding a tool that interrupted <strong style="color:var(--fg);font-weight:400">nearly two
+        thirds</strong> of genuine work on a real codebase. Four defects came out of it, none of
+        them a number that needed tuning.
+      </p>
+      <p style="margin-top:14px;color:var(--faint);font-size:14px;max-width:760px;line-height:1.6">
+        Being honest about it: a real commit is not always one clean task — developers bundle
+        incidental changes — so some of that 19.3% may be Ichor correctly questioning a tangential
+        edit. Nothing separates those, and no credit is claimed for it. One repository, 30 commits,
+        TypeScript.
+      </p>
+    </div>
+  </section>
+
   <!-- --------------------------------------------------------- install -->
   <section id="install">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">07 / Install</span>
+        <span class="eyebrow">08 / Install</span>
         <h2>Three Commands, And No Task To Type.</h2>
         <p>Your code never leaves your machine. Ichor runs HydraDB locally, so the graph of your codebase stays on your disk. There is no account.</p>
       </div>
@@ -537,7 +589,7 @@
   <section id="limits">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">08 / Honestly</span>
+        <span class="eyebrow">09 / Honestly</span>
         <h2>What It Cannot Do.</h2>
         <p>A tool that claims to know where a task belongs should be precise about where it is blind.</p>
       </div>

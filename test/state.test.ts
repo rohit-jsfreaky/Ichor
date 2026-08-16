@@ -56,7 +56,7 @@ function neighborhood(task: string, names: string[]): Neighborhood {
     members,
     models: new Map([[-1, { name: 'Vendor', viaFunction: '' }]]),
     coreModels: new Set(['Vendor']),
-    stats: { anchorCount: 0, memberCount: members.size, maxDistance: 0, queryCount: 0, truncated: false, durationMs: 0 },
+    stats: { anchorCount: 0, memberCount: members.size, maxDistance: 0, queryCount: 0, truncated: false, hubsSkipped: 0, durationMs: 0 },
   };
 }
 

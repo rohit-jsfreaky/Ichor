@@ -88,3 +88,5 @@ temp/
 *.tmp
 *.bak
 *.orig
+.resolver-baseline/
+.ground-truth/

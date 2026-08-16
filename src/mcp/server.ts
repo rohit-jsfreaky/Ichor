@@ -19,6 +19,7 @@
 import * as readline from 'node:readline';
 import { GraphClient, configFromEnv } from '../graph/client.js';
 import { callersOf, functionsTouching, pathsToModel } from '../graph/queries.js';
+import { repoIdFor } from '../ids.js';
 import { loadTask, toNeighborhood, markJustified, type PersistedTask } from '../state.js';
 import { classify } from '../scope/classify.js';
 import { parsePending } from '../scope/pending.js';
@@ -282,6 +283,7 @@ async function callTool(
         const verdict = await classify(
           { operation, file, content },
           {
+            repo: repoIdFor(repoRoot),
             client,
             neighborhood: toNeighborhood(task),
             pending: content ? parsePending(file, content) : undefined,
@@ -340,7 +342,7 @@ async function callTool(
       // before letting the boundary grow.
       const verdict = await classify(
         { operation: 'edit', file },
-        { client: getGraph(), neighborhood: toNeighborhood(task), forced: task.forced.map((f) => f.file) },
+        { client: getGraph(), neighborhood: toNeighborhood(task), repo: repoIdFor(repoRoot), forced: task.forced.map((f) => f.file) },
       );
 
       // GRAPH FIRST. If the structure already supports it, no model is needed.
@@ -410,7 +412,7 @@ async function callTool(
       const symbol = String(args.symbol ?? '').trim();
       if (!symbol) throw new Error('symbol is required');
 
-      const result = await callersOf(getGraph(), symbol);
+      const result = await callersOf(getGraph(), symbol, repoIdFor(repoRoot));
       if (result.callers.length === 0 && result.routes.length === 0) {
         return (
           `Nothing in the compiled graph calls ${symbol}.\n` +
@@ -441,10 +443,10 @@ async function callTool(
       const route = typeof args.route === 'string' ? args.route : undefined;
 
       const graph = getGraph();
-      const result = await pathsToModel(graph, model, { route });
+      const result = await pathsToModel(graph, model, repoIdFor(repoRoot), { route });
 
       if (result.paths.length === 0) {
-        const touching = await functionsTouching(graph, model);
+        const touching = await functionsTouching(graph, model, repoIdFor(repoRoot));
         if (touching.functions.length === 0) return `Nothing in the graph touches ${model}.`;
         const lines = [`No HTTP endpoint reaches ${model}, but these functions touch it:`, ''];
         for (const f of touching.functions) lines.push(`  ${f.name.padEnd(24)} ${f.file}`);

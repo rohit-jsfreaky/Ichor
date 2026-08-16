@@ -62,21 +62,46 @@ export function hashId(key: string): number {
 export type NodeKind = 'function' | 'route' | 'model' | 'field' | 'file' | 'type';
 
 /**
+ * A short, stable identifier for a checkout on this machine.
+ *
+ * Derived from the absolute path, so two clones of the same project in two
+ * directories are two projects — which is right, because they are two working
+ * copies a developer can edit independently.
+ */
+export function repoIdFor(repoRoot: string): string {
+  const normalised = repoRoot.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
+  return hashId(normalised).toString(36);
+}
+
+/** The repo an existing key belongs to. */
+export function repoOf(key: string): string {
+  const bar = key.indexOf('|');
+  return bar === -1 ? '' : key.slice(0, bar);
+}
+
+/**
  * Build the canonical key for a node.
  *
  * The key is what makes an id meaningful, so its shape is part of the contract:
  * change it and every id changes, which invalidates every stored graph.
  *
- *   function  ->  function:src/lib/invite.ts#sendInvite
- *   route     ->  route:POST /api/invite
- *   model     ->  model:User
- *   field     ->  field:User.email
- *   file      ->  file:src/lib/invite.ts
+ *   function  ->  <repo>|function:src/lib/invite.ts#sendInvite
+ *   route     ->  <repo>|route:POST /api/invite
+ *   model     ->  <repo>|model:User
+ *   field     ->  <repo>|field:User.email
+ *   file      ->  <repo>|file:src/lib/invite.ts
+ *
+ * The repo prefix is what makes more than one project able to share a database.
+ * Without it, paths are repo-RELATIVE, so any two projects containing a
+ * `src/lib/db.ts` produce a byte-identical key and therefore the same id — and
+ * `model:User` collides across any two projects at all. The two would silently
+ * merge into one node, inventing call edges between codebases that have never
+ * heard of each other, which is the one thing this file exists to prevent.
  *
  * `path` must already be repo-relative and POSIX-separated — see {@link normalisePath}.
  */
-export function nodeKey(kind: NodeKind, ...parts: string[]): string {
-  return `${kind}:${parts.join('#')}`;
+export function nodeKey(repoId: string, kind: NodeKind, ...parts: string[]): string {
+  return `${repoId}|${kind}:${parts.join('#')}`;
 }
 
 /**

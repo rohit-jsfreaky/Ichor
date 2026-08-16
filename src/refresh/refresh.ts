@@ -17,6 +17,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { analyzeRepo } from '../extract/analyze.js';
+import { analyzeIncremental, type FileCache } from '../extract/incremental.js';
 import { writeGraph } from '../graph/write.js';
 import { GraphClient, configFromEnv } from '../graph/client.js';
 import { findAnchors } from '../scope/anchors.js';
@@ -28,6 +29,7 @@ import type { GraphFacts } from '../extract/types.js';
 const FACTS_FILE = 'facts.json';
 const INDEX_FILE = 'index.json';
 const LOCK_FILE = 'refresh.lock';
+const CACHE_FILE = 'incremental.json';
 
 /** A lock older than this belonged to a process that died. */
 const LOCK_STALE_MS = 10 * 60_000;
@@ -44,6 +46,7 @@ interface FactsEnvelope {
 const factsPath = (repoRoot: string) => path.join(stateDir(repoRoot), FACTS_FILE);
 const indexPath = (repoRoot: string) => path.join(stateDir(repoRoot), INDEX_FILE);
 const lockPath = (repoRoot: string) => path.join(stateDir(repoRoot), LOCK_FILE);
+const cachePath = (repoRoot: string) => path.join(stateDir(repoRoot), CACHE_FILE);
 
 export function loadFacts(repoRoot: string): GraphFacts | undefined {
   try {
@@ -166,7 +169,14 @@ export interface RefreshResult {
  */
 export async function analyzeAndPersist(repoRoot: string, client: GraphClient): Promise<GraphFacts> {
   const builtAt = new Date().toISOString();
-  const facts = analyzeRepo(repoRoot);
+
+  // Re-read only what changed since last time. This falls back to a full read on
+  // its own whenever the cache cannot be trusted to give an identical answer —
+  // no cache, a deleted file, or too much of the tree affected to be worth it.
+  const previous = loadFacts(repoRoot) ?? undefined;
+  const result = analyzeIncremental(repoRoot, previous, loadCache(repoRoot));
+  const facts = result.facts;
+
   await writeGraph(client, facts);
 
   writeAtomic(
@@ -174,7 +184,17 @@ export async function analyzeAndPersist(repoRoot: string, client: GraphClient): 
     `${JSON.stringify({ version: 1, builtAt, facts } satisfies FactsEnvelope)}\n`,
   );
   writeAtomic(indexPath(repoRoot), `${JSON.stringify(buildNameIndex(facts, builtAt))}\n`);
+  writeAtomic(cachePath(repoRoot), `${JSON.stringify(result.cache)}\n`);
   return facts;
+}
+
+/** The previous run's file hashes and symbol tables, if they are still usable. */
+function loadCache(repoRoot: string): FileCache | undefined {
+  try {
+    return JSON.parse(fs.readFileSync(cachePath(repoRoot), 'utf8')) as FileCache;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

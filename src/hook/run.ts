@@ -31,6 +31,7 @@ import {
 import { parseHookInput, isEditingTool, type HookPayload } from './input.js';
 import { emitContext, handlePrompt } from './prompt.js';
 import { handleStop } from './stop.js';
+import { repoIdFor } from '../ids.js';
 
 /** Beyond this, allow the edit rather than make the agent wait. */
 const TIME_BUDGET_MS = 5_000;
@@ -242,6 +243,7 @@ export async function runHook(): Promise<void> {
       let verdict;
       try {
         verdict = await classify(intent, {
+          repo: repoIdFor(repoRoot),
           client,
           neighborhood,
           pending,

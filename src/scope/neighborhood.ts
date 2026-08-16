@@ -24,7 +24,7 @@
  */
 
 import { GraphClient, gInt } from '../graph/client.js';
-import { IdRegistry } from '../ids.js';
+import { IdRegistry, nodeKey, repoOf } from '../ids.js';
 import type { Anchor } from './anchors.js';
 
 export interface NeighborhoodMember {
@@ -62,6 +62,8 @@ export interface Neighborhood {
     queryCount: number;
     /** True when the member cap stopped the walk before it finished. */
     truncated: boolean;
+    /** Shared functions the walk declined to travel through. Reported, never hidden. */
+    hubsSkipped: number;
     durationMs: number;
   };
 }
@@ -106,27 +108,72 @@ export interface BuildOptions {
    * says so when it does (rule 2).
    */
   maxMembers?: number;
+  /**
+   * Refuse to walk through widely-used functions. On by default.
+   *
+   * Exposed so the ground-truth harness can measure the cost of every
+   * restriction rather than assuming each one is free.
+   */
+  hubRule?: boolean;
+  /** Allow `<Child />` edges to chain. Off by default — see the render rule below. */
+  renderChains?: boolean;
   onProgress?: (message: string) => void;
 }
 
 /**
- * Past this many users, a shape is the app's furniture rather than its subject.
+ * Past this many users, a thing is the app's furniture rather than its subject.
  *
- * Applies to every anchor that names a SHAPE rather than a piece of code — a
- * type, a model, a field. Each of those seeds "everything that uses this", and
- * in a real codebase the central entity is used by hundreds of functions. On a
- * 1,386-file product, `Link.linkType` seeded ~200 functions before one hop was
- * even walked, so "fix the typo in the delete link confirmation modal" claimed
- * 232 functions at depth 1 and 517 at depth 3.
+ * Applies to anything reached because it is WIDELY USED — a type, a model, a
+ * field, or a function the walk arrives at. Each of those otherwise pulls in
+ * "everything that uses this", and in a real codebase the shared pieces are used
+ * by hundreds of functions. On a 1,386-file product, `Link.linkType` seeded ~200
+ * functions before one hop was even walked, so "fix the typo in the delete link
+ * confirmation modal" claimed 232 functions at depth 1 and 517 at depth 3.
  *
- * Measured distribution of type usage in that codebase: 432 types used by one
- * function, 185 by two to five, 29 by six to twenty-five, and only TWO above it.
- * A type that genuinely IS the subject sits well under the line — `LinkWithViews`
- * had 22. So the line separates subjects from furniture rather than trimming
- * arbitrarily, and skipping is safe: the anchor is still recorded, we simply do
- * not treat every user of it as part of the job.
+ * The same line holds for both, measured independently on that codebase:
+ *
+ *   types      432 used by one function, 185 by two to five, 29 by six to
+ *              twenty-five, and only TWO above it
+ *   functions  990 with one caller, 482 with two to five, 81 with six to
+ *              twenty-five, and 15 of 1,568 above it
+ *
+ * Two separate distributions with the same shape and the same knee is why this
+ * is one constant rather than two tuned numbers. And the fifteen it excludes are
+ * unambiguous: `cn` (232 callers), `useTeam` (202), `errorhandler` (100), `log`,
+ * `AppLayout`, `DialogHeader`, `DialogFooter`, `BadgeTooltip`, `LoadingSpinner`
+ * — the design system and the utility drawer. Nothing there is ever the job.
+ *
+ * A thing that genuinely IS the subject sits well under the line: `LinkWithViews`
+ * had 22 users. And naming beats reach — an anchor is seeded before the walk
+ * begins, so "refactor the cn helper" still works. This only governs what is
+ * reached BY TRAVERSAL, where being popular is not evidence of being relevant.
  */
 const MAX_SHAPE_USERS = 25;
+
+/**
+ * How many of the top anchors get to say what the task is ABOUT.
+ *
+ * Finding all the code a task touches and identifying its subject are different
+ * questions needing different amounts of evidence. The anchor net is 60 wide
+ * because a narrower one missed real work — but letting all 60 vote on the
+ * subject let a weak anchor's models become "the task's data", which then made
+ * an unrelated subsystem's edits look legitimate. Twelve was the right size for
+ * this job all along; it was only ever the wrong size for the other one.
+ */
+const SUBJECT_ANCHORS = 12;
+
+/**
+ * How many distinct PLACES these rows represent.
+ *
+ * A place is a top-level declaration. Counting rows instead counts a component's
+ * handlers separately from the component, which inflates every "how shared is
+ * this" measurement the moment nested functions became visible.
+ */
+function distinctPlaces(records: { get(key: string): unknown }[]): number {
+  const places = new Set<string>();
+  for (const record of records) places.add(String(record.get('root') ?? record.get('id')));
+  return places.size;
+}
 
 export async function buildNeighborhood(
   client: GraphClient,
@@ -136,7 +183,17 @@ export async function buildNeighborhood(
   options: BuildOptions = {},
 ): Promise<Neighborhood> {
   const started = Date.now();
-  const maxDepth = options.maxDepth ?? 3;
+  /**
+   * One hop, not three — and this was decided by measurement, not taste.
+   *
+   * Three hops was chosen on an eleven-file demo. On a real 1,362-file product,
+   * measured against 30 real commits, depth 1 with good anchors beats depth 3
+   * with poor ones on BOTH counts at once: fewer correct edits challenged, and a
+   * task area less than half the size. Going to depth 2 buys another 2.4 points
+   * of quiet but doubles the area to a fifth of the whole repository, which is
+   * too much of the codebase to fall silent about.
+   */
+  const maxDepth = options.maxDepth ?? 1;
   const maxInboundDepth = options.maxInboundDepth ?? 1;
   const maxMembers = options.maxMembers ?? 800;
   let truncated = false;
@@ -176,8 +233,38 @@ export async function buildNeighborhood(
   // functions attached to it rather than being a member.
   const seeds: number[] = [];
 
-  for (const anchor of anchors) {
+  /**
+   * Seeds from the strongest anchors only — what the task is ABOUT.
+   *
+   * Finding every function a task touches and deciding what the task is about
+   * are different jobs and want different amounts of evidence. Widening the
+   * anchor net from 12 to 60 was right for the first and wrong for the second:
+   * weak anchors landed at distance 0, their models were counted as the task's
+   * own data, and a "clean up a helper in auth/session.ts" over-reach stopped
+   * being suspicious because auth's models now looked like the task's models.
+   *
+   * That is the circular reasoning this file already warns about under
+   * `coreModels`, arriving by a new route. The subject stays with the top few.
+   */
+  const coreSeeds = new Set<number>();
+
+  /** Shape anchors held back as too general — kept in case they are all we have. */
+  const skippedShapes: {
+    anchor: Anchor;
+    records: { get(key: string): unknown }[];
+    places: number;
+    reason: string;
+  }[] = [];
+
+  for (const [rank, anchor] of anchors.entries()) {
     const anchorId = gInt(ids.idFor(anchor.key));
+    /** Anchors are sorted by score, so rank is strength of evidence. */
+    const speaksForTheTask = rank < SUBJECT_ANCHORS;
+    /** Every branch below seeds through this, so none can forget the marking. */
+    const seed = (added: number[]) => {
+      seeds.push(...added);
+      if (speaksForTheTask) for (const id of added) coreSeeds.add(id);
+    };
 
     if (anchor.kind === 'function') {
       // Resolve name/file from the graph so anchors and traversal agree.
@@ -186,7 +273,7 @@ export async function buildNeighborhood(
         { id: anchorId },
       );
       queryCount++;
-      seeds.push(...absorb(rows.records, 0, () => `anchor — ${anchor.why}`));
+      seed(absorb(rows.records, 0, () => `anchor — ${anchor.why}`));
       continue;
     }
 
@@ -196,7 +283,7 @@ export async function buildNeighborhood(
       // handlers, serialisers and components that would have to change with it.
       const rows = await client.run(
         `MATCH (f:Function)-[:REFERENCES]->(t:Type {id: $id})
-           RETURN f.id AS id, f.name AS name, f.file AS file`,
+           RETURN f.id AS id, f.name AS name, f.file AS file, f.root AS root`,
         { id: anchorId },
       );
       queryCount++;
@@ -209,14 +296,14 @@ export async function buildNeighborhood(
       // one is the same mistake as walking inward through a shared helper, and it
       // pushed a boundary to 800 functions. A genuinely focused type sits well
       // under the line: `LinkWithViews`, the actual subject of that task, had 22.
-      if (rows.records.length > MAX_SHAPE_USERS) {
-        progress(
-          `${anchor.name} is used by ${rows.records.length} functions — too general to define a task`,
-        );
+      const places = distinctPlaces(rows.records);
+      if (places > MAX_SHAPE_USERS) {
+        skippedShapes.push({ anchor, records: rows.records, places, reason: 'used by' });
+        progress(`${anchor.name} is used in ${places} places — too general to define a task`);
         continue;
       }
 
-      seeds.push(...absorb(rows.records, 0, () => `uses ${anchor.name}`));
+      seed(absorb(rows.records, 0, () => `uses ${anchor.name}`));
       continue;
     }
 
@@ -227,29 +314,128 @@ export async function buildNeighborhood(
         { id: anchorId },
       );
       queryCount++;
-      seeds.push(...absorb(rows.records, 0, () => `handles ${anchor.name} — ${anchor.why}`));
+      seed(absorb(rows.records, 0, () => `handles ${anchor.name} — ${anchor.why}`));
       continue;
     }
 
     if (anchor.kind === 'model' || anchor.kind === 'field') {
-      const modelKey = anchor.kind === 'model' ? anchor.key : `model:${anchor.name.split('.')[0]}`;
+      // A field anchor names its model, and that model key must carry the same
+      // repo prefix the anchor does — otherwise it points at no node, or worse,
+      // at another project's model of the same name.
+      const modelKey =
+        anchor.kind === 'model'
+          ? anchor.key
+          : nodeKey(repoOf(anchor.key), 'model', anchor.name.split('.')[0]);
       const rows = await client.run(
         `MATCH (f:Function)-[:TOUCHES]->(m:Model {id: $id})
-           RETURN f.id AS id, f.name AS name, f.file AS file`,
+           RETURN f.id AS id, f.name AS name, f.file AS file, f.root AS root`,
         { id: gInt(ids.idFor(modelKey)) },
       );
       queryCount++;
-      if (rows.records.length > MAX_SHAPE_USERS) {
+      const places = distinctPlaces(rows.records);
+      if (places > MAX_SHAPE_USERS) {
+        skippedShapes.push({ anchor, records: rows.records, places, reason: 'touched in' });
         progress(
-          `${anchor.name} is touched by ${rows.records.length} functions — the app's core entity, not this task`,
+          `${anchor.name} is touched in ${places} places — the app's core entity, not this task`,
         );
         continue;
       }
-      seeds.push(...absorb(rows.records, 0, () => `touches ${anchor.name} — ${anchor.why}`));
+      seed(absorb(rows.records, 0, () => `touches ${anchor.name} — ${anchor.why}`));
     }
   }
 
+  /**
+   * An empty boundary is the worst outcome there is.
+   *
+   * Nothing is inside it, so EVERY edit is outside the task and gets challenged
+   * — the tool turns into pure noise on exactly the tasks it understood least.
+   * That is strictly worse than a boundary that is too wide, and it is a real
+   * failure that happened: a type used in 43 places was discarded as furniture,
+   * and since it was the task's only shape anchor the walk started from nothing.
+   *
+   * So the general-shape rule is a PREFERENCE, not a veto. If holding those
+   * anchors back leaves us with no way in at all, take the most specific one we
+   * held back and say so, rather than returning an empty answer.
+   */
+  if (seeds.length === 0 && skippedShapes.length > 0) {
+    const narrowest = skippedShapes.reduce((a, b) => (a.places <= b.places ? a : b));
+    progress(
+      `no other way in — falling back to ${narrowest.anchor.name}, ` +
+        `${narrowest.reason} ${narrowest.places} places`,
+    );
+    seeds.push(...absorb(narrowest.records, 0, () => `uses ${narrowest.anchor.name}`));
+  }
+
   progress(`${seeds.length} seed functions from ${anchors.length} anchors`);
+
+  // ---- the shared pieces the walk must not travel through ----------------
+  // One query for the whole graph rather than a caller count per node as we go:
+  // the walk visits hundreds of nodes and would otherwise ask the same question
+  // about `cn` from every one of them.
+  // Pairs rather than a grouped count, because the thing being counted is
+  // distinct CALLING PLACES, and a place is a top-level declaration — see the
+  // `root` property in graph/write.ts. Two handlers of one component calling
+  // `cn` is one place using it, not two.
+  // Only asked when the rule is on — this pulls every call edge in the project,
+  // and running it to build a map nobody reads was pure waste.
+  //
+  // Scoped to one repository: "how many places use this" counted across every
+  // project in the database would make a helper look shared because a DIFFERENT
+  // codebase happens to use one of the same name.
+  const hubRows =
+    options.hubRule === true
+      ? await client.run(
+          `MATCH (a:Function {repo: $repo})-[c:CALLS]->(b:Function)
+             RETURN b.id AS id, a.root AS caller, c.contains AS contains`,
+          { repo: anchors.length ? repoOf(anchors[0].key) : '' },
+        )
+      : { records: [] as { get(key: string): unknown }[] };
+  if (options.hubRule === true) queryCount++;
+  const callerPlaces = new Map<number, Set<string>>();
+  for (const record of hubRows.records) {
+    // A parent "calling" the function it declares is not a user of it.
+    if (record.get('contains') === true) continue;
+    const id = Number(record.get('id'));
+    const place = String(record.get('caller'));
+    const places = callerPlaces.get(id) ?? new Set<string>();
+    places.add(place);
+    callerPlaces.set(id, places);
+  }
+  /**
+   * The hub rule is OFF by default, and this reverses an earlier decision of mine.
+   *
+   * It was justified on boundary SIZE alone — 15 functions with more than 25
+   * callers, all of them design-system and utility code, and refusing to walk
+   * through them cut a bloated boundary down usefully. That reasoning was fine
+   * as far as it went, and it went the wrong way: shared code is often exactly
+   * what a task is about. `sendEmail` has 38 callers, and "add emails and slack
+   * invitation" is a task ABOUT `sendEmail`.
+   *
+   * Measured against real commits it is net negative on every axis that matters
+   * — turning it off lowered wrongly challenged edits from 19.3% to 15.7% AND
+   * raised how much of the real work landed inside the boundary, for 0.6% more
+   * area. Size was the wrong thing to have optimised.
+   */
+  const hubs = new Map<number, number>();
+  if (options.hubRule === true) {
+    for (const [id, places] of callerPlaces) {
+      if (places.size > MAX_SHAPE_USERS) hubs.set(id, places.size);
+    }
+  }
+
+  /**
+   * Anchors outrank the hub rule.
+   *
+   * "refactor the cn helper" names `cn` directly, and a task is allowed to be
+   * about a shared thing. What is not allowed is REACHING one and treating
+   * everything on its far side as part of the job.
+   */
+  for (const id of seeds) hubs.delete(id);
+
+  const hubsSkipped = new Map<string, number>();
+
+  /** Members that entered the walk as `<Child />`. See the render rule below. */
+  const renderArrivals = new Set<number>();
 
   // ---- expand ------------------------------------------------------------
   // One hop at a time rather than a variable-length pattern, because we need the
@@ -259,27 +445,91 @@ export async function buildNeighborhood(
   for (let depth = 1; depth <= maxDepth && frontier.length > 0; depth++) {
     const next: number[] = [];
 
-    for (const id of frontier) {
+    // A worklist rather than a fixed list: functions pulled in by containment
+    // belong to THIS depth, so they have to be expanded in this round too.
+    // Containment cannot cycle, so this always terminates.
+    const current = [...frontier];
+
+    for (let index = 0; index < current.length; index++) {
+      const id = current[index];
       const fromName = members.get(id)?.name ?? '?';
       const param = gInt(id);
 
+      /** Drop the shared pieces, and record what was dropped (rule 2). */
+      const withoutHubs = (records: { get(key: string): unknown }[]) =>
+        records.filter((record) => {
+          const callers = hubs.get(Number(record.get('id')));
+          if (callers === undefined) return true;
+          hubsSkipped.set(String(record.get('name')), callers);
+          return false;
+        });
+
+      /**
+       * Rendering does not chain.
+       *
+       * `<Child />` is composition, not dependency: a page assembles twenty
+       * widgets that have nothing to do with each other. Following one render
+       * edge from the task's own code is right — you may well have to pass the
+       * child a prop. Following a SECOND one, out of a component you only
+       * reached by rendering, walks into someone else's feature.
+       *
+       * Measured: a third of all call edges in a React codebase come from JSX,
+       * and this chain is what let "the dataroom folder tree does not refresh"
+       * arrive at a PDF viewer's icon components three hops out.
+       */
+      const arrivedByRender = options.renderChains !== true && renderArrivals.has(id);
+      const keep = (records: { get(key: string): unknown }[]) =>
+        withoutHubs(records).filter((record) => !(arrivedByRender && record.get('render') === true));
+
+      /**
+       * Only mark a member as render-arrived if rendering is the ONLY way it got
+       * here. A component that is both called and rendered by the same parent —
+       * `useThing()` alongside `<Thing />` — is a real dependency, and treating
+       * it as decoration would stop the walk one hop early.
+       */
+      const noteRenders = (records: { get(key: string): unknown }[], added: number[]) => {
+        const called = new Set<number>();
+        const rendered = new Set<number>();
+        for (const record of records) {
+          const id = Number(record.get('id'));
+          (record.get('render') === true ? rendered : called).add(id);
+        }
+        for (const id of added) if (rendered.has(id) && !called.has(id)) renderArrivals.add(id);
+      };
+
       const callees = await client.run(
-        `MATCH (a:Function {id: $id})-[:CALLS]->(b:Function)
-           RETURN b.id AS id, b.name AS name, b.file AS file`,
+        `MATCH (a:Function {id: $id})-[c:CALLS]->(b:Function)
+           RETURN b.id AS id, b.name AS name, b.file AS file, c.render AS render, c.contains AS contains`,
         { id: param },
       );
       queryCount++;
-      next.push(...absorb(callees.records, depth, () => `called by ${fromName}`));
+
+      // A function declared inside this one IS this one, for scope purposes, so
+      // it joins at the same distance rather than a hop further out. Charging it
+      // a hop would push a component's own handlers toward the edge of its own
+      // task area — and the handlers are usually where the work actually is.
+      const contained = callees.records.filter((record) => record.get('contains') === true);
+      const inherited = members.get(id)?.distance ?? depth;
+      current.push(...absorb(contained, inherited, () => `declared inside ${fromName}`));
+
+      const kept = keep(callees.records.filter((record) => record.get('contains') !== true));
+      const addedOut = absorb(kept, depth, () => `called by ${fromName}`);
+      noteRenders(kept, addedOut);
+      next.push(...addedOut);
 
       // Consumers, only close to the anchors. See maxInboundDepth.
       if (depth <= maxInboundDepth) {
         const callers = await client.run(
-          `MATCH (b:Function)-[:CALLS]->(a:Function {id: $id})
-             RETURN b.id AS id, b.name AS name, b.file AS file`,
+          `MATCH (b:Function)-[c:CALLS]->(a:Function {id: $id})
+             RETURN b.id AS id, b.name AS name, b.file AS file, c.render AS render`,
           { id: param },
         );
         queryCount++;
-        next.push(...absorb(callers.records, depth, () => `calls ${fromName}`));
+        // Inbound is not filtered by the render rule: the page that renders the
+        // component you are changing is genuinely above it, and inbound is
+        // already held to one hop.
+        const addedIn = absorb(withoutHubs(callers.records), depth, () => `calls ${fromName}`);
+        next.push(...addedIn);
       }
 
       if (members.size >= maxMembers) {
@@ -296,6 +546,17 @@ export async function buildNeighborhood(
     if (frontier.length) progress(`depth ${depth}: +${frontier.length} functions`);
   }
 
+  if (hubsSkipped.size) {
+    const named = [...hubsSkipped.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([name, callers]) => `${name} (${callers} callers)`);
+    progress(
+      `did not walk through ${hubsSkipped.size} shared function${hubsSkipped.size === 1 ? '' : 's'}: ` +
+        `${named.join(', ')}${hubsSkipped.size > named.length ? ', …' : ''}`,
+    );
+  }
+
   // ---- models the neighbourhood reaches ----------------------------------
   const coreModels = new Set<string>();
 
@@ -310,8 +571,8 @@ export async function buildNeighborhood(
       const modelId = Number(record.get('id'));
       const name = String(record.get('name'));
       if (!models.has(modelId)) models.set(modelId, { name, viaFunction: member.name });
-      // Only an anchor speaks for what the task is about.
-      if (member.distance === 0) coreModels.add(name);
+      // Only a STRONG anchor speaks for what the task is about — see coreSeeds.
+      if (coreSeeds.has(member.id)) coreModels.add(name);
     }
   }
 
@@ -330,6 +591,7 @@ export async function buildNeighborhood(
       maxDistance: distances.length ? Math.max(...distances) : 0,
       queryCount,
       truncated,
+      hubsSkipped: hubsSkipped.size,
       durationMs: Date.now() - started,
     },
   };

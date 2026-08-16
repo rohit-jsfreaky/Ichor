@@ -25,7 +25,7 @@ function neighborhood(): Neighborhood {
     ]),
     models: new Map([[1, { name: 'Vendor', viaFunction: 'createVendor' }]]),
     coreModels: new Set(['Vendor']),
-    stats: { anchorCount: 2, memberCount: 2, maxDistance: 0, queryCount: 0, truncated: false, durationMs: 0 },
+    stats: { anchorCount: 2, memberCount: 2, maxDistance: 0, queryCount: 0, truncated: false, hubsSkipped: 0, durationMs: 0 },
   };
 }
 

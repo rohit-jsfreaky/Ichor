@@ -36,7 +36,7 @@ async function main() {
   // any disagreement is the engine or our query, never ambiguity in the data.
   const chain = ['route', 'handler', 'service', 'repo', 'sink'];
   const nodes = chain.map((name, i) => ({
-    id: ids.idFor(nodeKey('function', 'smoke.ts', name)),
+    id: ids.idFor(nodeKey('smoke', 'function', 'smoke.ts', name)),
     name,
     depth: i,
   }));

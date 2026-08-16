@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { hashId, nodeKey, normalisePath, IdRegistry, IdCollisionError } from '../src/ids.js';
+import { hashId, nodeKey, normalisePath, IdRegistry, IdCollisionError, repoIdFor, repoOf } from '../src/ids.js';
 
 describe('hashId', () => {
   it('is deterministic', () => {
@@ -36,7 +36,7 @@ describe('hashId', () => {
     const seen = new Map<number, string>();
     for (let f = 0; f < 400; f++) {
       for (let n = 0; n < 250; n++) {
-        const key = nodeKey('function', `src/module${f}/file${f}.ts`, `handler${n}`);
+        const key = nodeKey(REPO, 'function', `src/module${f}/file${f}.ts`, `handler${n}`);
         const id = hashId(key);
         const prev = seen.get(id);
         if (prev !== undefined && prev !== key) throw new Error(`collision: ${prev} vs ${key}`);
@@ -47,16 +47,44 @@ describe('hashId', () => {
   });
 });
 
+/** Stands in for one checkout. Its exact value is not meaningful. */
+const REPO = 'r1';
+
 describe('nodeKey', () => {
+  it('keeps two projects apart', () => {
+    // The whole reason keys carry a repo: paths are repo-RELATIVE, so without it
+    // any two projects containing a `src/lib/db.ts` become ONE node, and
+    // `model:User` collides across any two projects at all. That would invent
+    // call edges between codebases that have never heard of each other.
+    const a = nodeKey('repo-a', 'function', 'src/lib/db.ts', 'connect');
+    const b = nodeKey('repo-b', 'function', 'src/lib/db.ts', 'connect');
+    expect(a).not.toBe(b);
+    expect(hashId(a)).not.toBe(hashId(b));
+
+    expect(hashId(nodeKey('repo-a', 'model', 'User'))).not.toBe(hashId(nodeKey('repo-b', 'model', 'User')));
+  });
+
+  it('reports which project a key belongs to', () => {
+    expect(repoOf(nodeKey('repo-a', 'model', 'User'))).toBe('repo-a');
+  });
+
+  it('gives one checkout one id, whatever the path separators', () => {
+    // Windows separators, a trailing slash and case must not make one checkout
+    // look like three — otherwise the same project gets three sets of nodes.
+    expect(repoIdFor(String.raw`D:\repos\app`)).toBe(repoIdFor('D:/repos/app/'));
+    expect(repoIdFor('D:/Repos/App')).toBe(repoIdFor('d:/repos/app'));
+    expect(repoIdFor('/home/a/app')).not.toBe(repoIdFor('/home/a/other'));
+  });
+
   it('keeps kinds in separate namespaces', () => {
     // A model named "User" and a function named "User" must never share an id.
-    expect(hashId(nodeKey('model', 'User'))).not.toBe(hashId(nodeKey('function', 'User')));
+    expect(hashId(nodeKey(REPO, 'model', 'User'))).not.toBe(hashId(nodeKey(REPO, 'function', 'User')));
   });
 
   it('builds the documented shapes', () => {
-    expect(nodeKey('function', 'src/lib/invite.ts', 'sendInvite')).toBe('function:src/lib/invite.ts#sendInvite');
-    expect(nodeKey('route', 'POST /api/invite')).toBe('route:POST /api/invite');
-    expect(nodeKey('field', 'User.email')).toBe('field:User.email');
+    expect(nodeKey(REPO, 'function', 'src/lib/invite.ts', 'sendInvite')).toBe(`${REPO}|function:src/lib/invite.ts#sendInvite`);
+    expect(nodeKey(REPO, 'route', 'POST /api/invite')).toBe(`${REPO}|route:POST /api/invite`);
+    expect(nodeKey(REPO, 'field', 'User.email')).toBe(`${REPO}|field:User.email`);
   });
 });
 
@@ -68,7 +96,7 @@ describe('normalisePath', () => {
     const nix = normalisePath('/home/rohit/app/src/lib/invite.ts', '/home/rohit/app');
     expect(win).toBe('src/lib/invite.ts');
     expect(nix).toBe('src/lib/invite.ts');
-    expect(hashId(nodeKey('function', win, 'x'))).toBe(hashId(nodeKey('function', nix, 'x')));
+    expect(hashId(nodeKey(REPO, 'function', win, 'x'))).toBe(hashId(nodeKey(REPO, 'function', nix, 'x')));
   });
 
   it('tolerates a trailing separator on the root', () => {
@@ -79,14 +107,14 @@ describe('normalisePath', () => {
 describe('IdRegistry', () => {
   it('returns a stable id for the same key', () => {
     const reg = new IdRegistry();
-    const key = nodeKey('function', 'src/a.ts', 'foo');
+    const key = nodeKey(REPO, 'function', 'src/a.ts', 'foo');
     expect(reg.idFor(key)).toBe(reg.idFor(key));
     expect(reg.size).toBe(1);
   });
 
   it('maps an id back to a readable key', () => {
     const reg = new IdRegistry();
-    const key = nodeKey('route', 'POST /api/invite');
+    const key = nodeKey(REPO, 'route', 'POST /api/invite');
     expect(reg.keyFor(reg.idFor(key))).toBe(key);
   });
 

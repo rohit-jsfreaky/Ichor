@@ -53,6 +53,7 @@ export interface CallersResult extends Truncatable {
 export async function callersOf(
   client: GraphClient,
   symbol: string,
+  repo: string,
   limit = 40,
 ): Promise<CallersResult> {
   // Walked one hop at a time, deliberately.
@@ -63,8 +64,12 @@ export async function callersOf(
   // and here the node we know is the TARGET, not the source. So we pin ids and
   // widen a level at a time, which is the same shape buildNeighborhood uses.
   const seeds = await client.run(
-    `MATCH (f:Function) WHERE f.name = $name RETURN f.id AS id LIMIT 10`,
-    { name: symbol },
+    // Scoped to one project. Seeding by BARE NAME across the whole database is
+    // the most dangerous pattern in this file: with two projects loaded, asking
+    // who calls `handler` would answer from both, and the answer would look
+    // perfectly plausible.
+    `MATCH (f:Function {repo: $repo}) WHERE f.name = $name RETURN f.id AS id LIMIT 10`,
+    { name: symbol, repo },
   );
 
   const seen = new Set<string>();
@@ -106,11 +111,11 @@ export async function callersOf(
   }
 
   const routes = await client.run(
-    `MATCH (r:Route)-[:HANDLED_BY]->(h:Function)
+    `MATCH (r:Route {repo: $repo})-[:HANDLED_BY]->(h:Function)
        WHERE h.name = $name
        RETURN r.method AS method, r.path AS path, h.name AS handler
        LIMIT ${limit + 1}`,
-    { name: symbol },
+    { name: symbol, repo },
   );
 
   return {
@@ -148,16 +153,19 @@ export interface PathsResult extends Truncatable {
 export async function pathsToModel(
   client: GraphClient,
   model: string,
+  repo: string,
   options: { route?: string; limit?: number } = {},
 ): Promise<PathsResult> {
   const limit = options.limit ?? 40;
 
   const rows = await client.run(
-    `MATCH (r:Route)-[:HANDLED_BY]->(h:Function)-[:CALLS*1..${MAX_DEPTH}]->(f:Function)-[:TOUCHES]->(m:Model)
+    // Pinning the route to one project pins the whole path: an edge never joins
+    // two projects, so every node downstream of a scoped start is scoped too.
+    `MATCH (r:Route {repo: $repo})-[:HANDLED_BY]->(h:Function)-[:CALLS*1..${MAX_DEPTH}]->(f:Function)-[:TOUCHES]->(m:Model)
        WHERE m.name = $model
        RETURN r.method AS method, r.path AS path, h.name AS handler, f.name AS reacher
        LIMIT ${limit + 1}`,
-    { model },
+    { model, repo },
   );
 
   // Filtering by route happens here, not in the query: HydraDB rejects
@@ -181,14 +189,15 @@ export async function pathsToModel(
 export async function functionsTouching(
   client: GraphClient,
   model: string,
+  repo: string,
   limit = 40,
 ): Promise<{ functions: { name: string; file: string }[] } & Truncatable> {
   const rows = await client.run(
-    `MATCH (f:Function)-[:TOUCHES]->(m:Model)
+    `MATCH (f:Function {repo: $repo})-[:TOUCHES]->(m:Model)
        WHERE m.name = $model
        RETURN f.name AS name, f.file AS file
        LIMIT ${limit + 1}`,
-    { model },
+    { model, repo },
   );
 
   return {

@@ -63,6 +63,16 @@ const EXPECTED_MAX_DISTANCE = 0;
 export interface ClassifyDeps {
   client: GraphClient;
   neighborhood: Neighborhood;
+  /**
+   * Which project this edit belongs to.
+   *
+   * Every query below that matches on a PATH or a NAME rather than an id needs
+   * it. `src/lib/db.ts` and a model called `User` exist in most projects, so
+   * without the filter a second project in the same database would answer for
+   * the first — and the answer would look entirely reasonable, which is the
+   * dangerous kind of wrong.
+   */
+  repo: string;
   /** Parsed pending content, when the operation carries content. */
   pending?: PendingFacts;
   /**
@@ -113,7 +123,18 @@ export async function classify(intent: ChangeIntent, deps: ClassifyDeps): Promis
     // hops from the route simply because the route authenticates, yet it has
     // nothing to do with a duplicate-email bug. The signal that separates them
     // is whether the file works on the same DATA as the task.
-    const overlap = await modelOverlap(deps, membersInFile.map((m) => m.id));
+    /**
+     * Judge the FILE's data, not just the member's.
+     *
+     * The unit being edited is a file, and `existingFileOutsideTask` already
+     * asks what the whole file works on. Asking only what the matched members
+     * touch made the same question answerable two ways: `auth/session.ts` has
+     * one function one hop from the task, `requireSession`, which touches no
+     * model at all — so the overlap came back empty and a "while I was in here"
+     * cleanup of an auth file read as connected, even though everything else in
+     * that file works on Session and User and the task is about Vendor.
+     */
+    const overlap = await modelOverlap(deps, await functionsDeclaredIn(intent.file, deps));
     const taskModels = neighborhood.coreModels;
 
     if (overlap.shared.length > 0) {
@@ -248,15 +269,42 @@ async function existingFileOutsideTask(
   deps: ClassifyDeps,
 ): Promise<Verdict | undefined> {
   const rows = await deps.client.run(
-    `MATCH (f:File)-[:DECLARES]->(fn:Function)
+    `MATCH (f:File {repo: $repo})-[:DECLARES]->(fn:Function)
        WHERE f.path = $path
        RETURN fn.id AS id, fn.name AS name`,
-    { path: file },
+    { path: file, repo: deps.repo },
   );
   if (rows.records.length === 0) return undefined; // not in the graph — a new file
 
   const functionIds = rows.records.map((r) => Number(r.get('id')));
   const names = rows.records.map((r) => String(r.get('name')));
+
+  /**
+   * Give an existing file the same hearing a new one gets.
+   *
+   * This branch used to challenge any file with no member in it, full stop. But
+   * the boundary is a few hundred functions out of several thousand, so "no
+   * member here" describes almost every file a real task touches — and a NEW
+   * file was treated more generously than an existing one, which is backwards.
+   *
+   * Measured against 30 real commits, this single branch produced 50 of the 51
+   * challenges Ichor would have raised against work a developer genuinely had to
+   * do. One hop is the honest test: if code here calls, or is called by, the
+   * task's own code, it is connected, and connected is not suspicious.
+   */
+  const link = await oneHopFromTask(functionIds, deps);
+  if (link) {
+    return {
+      decision: 'CONNECTED',
+      reason: `${file} is not part of the task, but ${link.from} ${link.direction} ${link.to}, which is.`,
+      evidence: [
+        { kind: 'note', text: `declares ${names.slice(0, 4).join(', ')}` },
+        { kind: 'member', text: `${link.from} ${link.direction} ${link.to}` },
+      ],
+      needsJudge: false,
+    };
+  }
+
   const overlap = await modelOverlap(deps, functionIds);
 
   const evidence: Evidence[] = [
@@ -277,6 +325,58 @@ async function existingFileOutsideTask(
     question: `Why does "${deps.neighborhood.task}" require a change in ${file}?`,
     needsJudge: true,
   };
+}
+
+/** Graph ids of every function a file declares. */
+async function functionsDeclaredIn(file: string, deps: ClassifyDeps): Promise<number[]> {
+  const rows = await deps.client.run(
+    `MATCH (f:File {repo: $repo})-[:DECLARES]->(fn:Function)
+       WHERE f.path = $path
+       RETURN fn.id AS id`,
+    { path: file, repo: deps.repo },
+  );
+  return rows.records.map((r) => Number(r.get('id')));
+}
+
+/**
+ * Does any of these functions sit one call away from the task's own code?
+ *
+ * Stops at the first link found — one concrete connection is enough to answer
+ * the question, and the citation is what the developer actually reads.
+ */
+async function oneHopFromTask(
+  functionIds: number[],
+  deps: ClassifyDeps,
+): Promise<{ from: string; to: string; direction: string } | undefined> {
+  const members = new Map(
+    [...deps.neighborhood.members.values()].map((m) => [m.id, m.name]),
+  );
+  if (members.size === 0) return undefined;
+
+  for (const id of functionIds) {
+    const calls = await deps.client.run(
+      `MATCH (a:Function {id: $id})-[:CALLS]->(b:Function)
+         RETURN a.name AS from, b.id AS id, b.name AS to`,
+      { id: gInt(id) },
+    );
+    for (const record of calls.records) {
+      if (members.has(Number(record.get('id')))) {
+        return { from: String(record.get('from')), to: String(record.get('to')), direction: 'calls' };
+      }
+    }
+
+    const callers = await deps.client.run(
+      `MATCH (b:Function)-[:CALLS]->(a:Function {id: $id})
+         RETURN a.name AS from, b.id AS id, b.name AS to`,
+      { id: gInt(id) },
+    );
+    for (const record of callers.records) {
+      if (members.has(Number(record.get('id')))) {
+        return { from: String(record.get('from')), to: String(record.get('to')), direction: 'is called by' };
+      }
+    }
+  }
+  return undefined;
 }
 
 /** Models touched by a set of functions, split by whether the TASK is about them. */
@@ -394,12 +494,12 @@ async function findDuplicateFlow(
     // truncates silently, and a tight limit would decide which route we cite by
     // row order before the ranking below ever sees the alternatives.
     const rows = await client.run(
-      `MATCH (r:Route)-[:HANDLED_BY]->(h:Function)-[:CALLS*1..4]->(f:Function)-[:TOUCHES]->(m:Model)
+      `MATCH (r:Route {repo: $repo})-[:HANDLED_BY]->(h:Function)-[:CALLS*1..4]->(f:Function)-[:TOUCHES]->(m:Model)
          WHERE m.name = $model
          RETURN r.method AS method, r.path AS path, h.name AS handler, f.name AS reacher,
                 r.file AS routeFile
          LIMIT 50`,
-      { model: taskModel.name },
+      { model: taskModel.name, repo: deps.repo },
     );
 
     const forced = new Set(deps.forced ?? []);
@@ -416,10 +516,10 @@ async function findDuplicateFlow(
     // it is usually the whole reason the extra endpoint is unnecessary. Fetched
     // BEFORE the ranking, because it changes which route argues best.
     const uniqueRows = await client.run(
-      `MATCH (m:Model)-[:HAS_FIELD]->(f:Field)
+      `MATCH (m:Model {repo: $repo})-[:HAS_FIELD]->(f:Field)
          WHERE m.name = $model AND f.isUnique = true
          RETURN f.name AS name LIMIT 3`,
-      { model: taskModel.name },
+      { model: taskModel.name, repo: deps.repo },
     );
     const uniqueFields = uniqueRows.records
       .map((r) => String(r.get('name')))
@@ -518,11 +618,11 @@ async function pendingReaches(
     const candidates = [`${imported}.ts`, `${imported}.tsx`, `${imported}/index.ts`];
 
     const rows = await deps.client.run(
-      `MATCH (f:File)-[:DECLARES]->(fn:Function)-[:TOUCHES]->(m:Model)
+      `MATCH (f:File {repo: $repo})-[:DECLARES]->(fn:Function)-[:TOUCHES]->(m:Model)
          WHERE f.path = $a OR f.path = $b OR f.path = $c
          RETURN m.name AS model, f.path AS file
          LIMIT 50`,
-      { a: candidates[0], b: candidates[1], c: candidates[2] },
+      { a: candidates[0], b: candidates[1], c: candidates[2], repo: deps.repo },
     );
 
     for (const record of rows.records) {

@@ -13,7 +13,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { nodeKey } from '../ids.js';
+import { nodeKey, repoIdFor } from '../ids.js';
 import type { ModelFact, FieldFact } from './types.js';
 
 export interface PrismaSchema {
@@ -82,6 +82,7 @@ export function findSchema(repoRoot: string): string | undefined {
  * a useful call graph, it just has no model layer.
  */
 export function parsePrismaSchema(repoRoot: string): PrismaSchema {
+  const repoId = repoIdFor(repoRoot);
   const schemaPaths = findSchemas(repoRoot);
   if (schemaPaths.length === 0) return { models: [], fields: [] };
 
@@ -100,7 +101,7 @@ export function parsePrismaSchema(repoRoot: string): PrismaSchema {
     const modelName = match[1];
     const body = match[2];
 
-    const modelKey = nodeKey('model', modelName);
+    const modelKey = nodeKey(repoId, 'model', modelName);
     if (seen.has(modelKey)) continue;
     seen.add(modelKey);
     models.push({ key: modelKey, name: modelName });
@@ -115,7 +116,7 @@ export function parsePrismaSchema(repoRoot: string): PrismaSchema {
 
       const [, fieldName, fieldType, attributes] = field;
 
-      const fieldKey = nodeKey('field', `${modelName}.${fieldName}`);
+      const fieldKey = nodeKey(repoId, 'field', `${modelName}.${fieldName}`);
       if (seen.has(fieldKey)) continue;
       seen.add(fieldKey);
 

@@ -70,8 +70,26 @@ describe('the task path — the chain the whole demo depends on', () => {
 
   it('the UI chain reaches the toast', () => {
     expect(calls('NewVendorPage', 'VendorForm')).toBe(true); // JSX, not a call expression
-    expect(calls('VendorForm', 'submitVendor')).toBe(true);
+    // The submit does not happen in the component body, it happens in the
+    // component's own handler — so the chain runs through `VendorForm.handleSubmit`.
+    // Asserting the flat `VendorForm -> submitVendor` shape would be asserting
+    // that Ichor cannot see inside a component, which is the defect this fixes.
+    expect(calls('VendorForm', 'VendorForm.handleSubmit')).toBe(true);
+    expect(calls('VendorForm.handleSubmit', 'submitVendor')).toBe(true);
     expect(calls('submitVendor', 'showToast')).toBe(true);
+  });
+
+  it('a nested function is joined to the function that declares it', () => {
+    // Without this edge the graph is in pieces: a walk starting at the component
+    // could never reach the component's own handler, so the boundary would come
+    // out too SMALL and Ichor would challenge correct work.
+    const parent = facts.functions.find((f) => f.name === 'VendorForm');
+    const handler = facts.functions.find((f) => f.name === 'VendorForm.handleSubmit');
+    expect(parent).toBeDefined();
+    expect(handler).toBeDefined();
+
+    const edge = facts.calls.find((c) => c.fromKey === parent!.key && c.toKey === handler!.key);
+    expect(edge?.viaContains).toBe(true);
   });
 });
 

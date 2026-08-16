@@ -29,6 +29,8 @@
     "ingest": "tsx scripts/ingest.ts",
     "scope": "tsx scripts/scope.ts",
     "check": "tsx scripts/check.ts",
+    "multi:test": "tsx scripts/multi-repo-test.ts",
+    "incremental:test": "tsx scripts/incremental-test.ts",
     "hook:test": "tsx scripts/hook-test.ts",
     "mcp:test": "node dist/scripts/mcp-test.js",
     "judge:test": "node -r dotenv/config dist/scripts/judge-test.js"

@@ -25,6 +25,15 @@ export interface FunctionFact extends SourceLocation {
   isComponent: boolean;
   /** True when declared in a *.test.ts / *.spec.ts file. */
   isTest: boolean;
+  /**
+   * Last line of the declaration.
+   *
+   * A function is a RANGE, not a point, and `line` alone cannot answer "which
+   * function is this edit in?" — the question the ground-truth harness asks of
+   * every line in a real commit's diff. With both ends, and nested functions
+   * being visible, the owner of a line is the innermost range containing it.
+   */
+  endLine: number;
 }
 
 export interface FileFact {
@@ -90,6 +99,32 @@ export interface FieldFact {
 export interface CallEdge extends SourceLocation {
   fromKey: string;
   toKey: string;
+  /**
+   * True when this is `<Child />` rather than `child()`.
+   *
+   * Both are real edges, but they mean different things, and collapsing them was
+   * measured to be the single largest cause of an over-wide task boundary. A
+   * page component renders twenty unrelated widgets; treating that as "the page
+   * depends on all twenty" lets a walk cross from a folder tree into a PDF
+   * viewer's icons. See `renderStep` in scope/neighborhood.ts for the rule this
+   * flag exists to support.
+   */
+  viaRender?: boolean;
+  /**
+   * True when the target is declared INSIDE the source — `handleSubmit` inside
+   * `VendorForm`.
+   *
+   * Without this edge, making nested functions visible would cut the graph into
+   * pieces: `VendorForm` and `VendorForm.handleSubmit` would be two unconnected
+   * nodes, and a walk starting at the component could no longer reach what the
+   * component actually does. A fragmented graph draws boundaries that are too
+   * SMALL, which produces false challenges — worse than the imprecision this
+   * whole workstream set out to fix.
+   *
+   * Containment is not distance: the handler is part of the component, so the
+   * walk admits it at the same distance rather than one hop further out.
+   */
+  viaContains?: boolean;
 }
 
 /** A function reading or writing a Prisma model. */
@@ -119,6 +154,15 @@ export interface ExtractionStats {
   callSitesResolvedInRepo: number;
   callSitesExternal: number;
   callSitesUnresolved: number;
+  /**
+   * `obj.method()` calls we deliberately do not resolve.
+   *
+   * Only TypeScript's type checker knows what `obj` is, and asking it costs
+   * ~2.45ms a call — about forty seconds on a real repository — to recover the
+   * 2.5% of edges these represent. Matching by method name instead would invent
+   * structure, so they are counted and reported (rules 1 and 2).
+   */
+  callSitesNeedingTypes: number;
   /** Type mentions the compiler resolved to a type declared in this repo. */
   typeRefsResolved: number;
   /**
@@ -138,9 +182,25 @@ export interface ExtractionStats {
    * HydraDB rejects the entire write when an endpoint is missing.
    */
   edgesDropped: number;
+  /**
+   * Declarations that wanted a key another declaration in the same file already
+   * held — a static and an instance method of one name, or a getter and its
+   * setter. The first wins; this is how many lost, so the number is visible
+   * rather than inferred from a missing node (rule 2).
+   */
+  duplicateNames: number;
   /** Wall-clock milliseconds for the whole extraction. */
   durationMs: number;
 }
+
+/**
+ * What each file declares, imports and exports.
+ *
+ * Returned so an incremental run can replay them for files it does not re-read —
+ * resolution is a cross-file question, and without them parsing one file in
+ * isolation resolves nothing it imports. See extract/incremental.ts.
+ */
+export type SymbolTables = Map<string, import('./symbols.js').FileSymbols>;
 
 /** Everything one analysis run produces. */
 export interface GraphFacts {
@@ -155,6 +215,12 @@ export interface GraphFacts {
   references: ReferenceEdge[];
   touches: TouchEdge[];
   imports: ImportEdge[];
+  /**
+   * Per-file symbol tables. Present on a fresh analysis, absent once facts have
+   * been through JSON — Maps do not survive serialisation, and the incremental
+   * cache stores them separately in a form that does.
+   */
+  symbols?: SymbolTables;
   stats: ExtractionStats;
 }
 

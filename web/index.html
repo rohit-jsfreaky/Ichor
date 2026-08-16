@@ -9,6 +9,9 @@
 <meta property="og:description" content="Ichor watches your AI coding agent while it works and challenges it the moment it goes past the job you gave it. Measured on 30 real commits from a real product." />
 <meta property="og:type" content="website" />
 
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='0' y='0' width='14' height='14' rx='1.5' fill='%23a8ff35'/%3E%3Crect x='16' y='0' width='14' height='14' rx='1.5' fill='%23a8ff35'/%3E%3Crect x='0' y='16' width='14' height='14' rx='1.5' fill='%23a8ff35'/%3E%3Crect x='20' y='20' width='12' height='12' rx='1.5' fill='%23ffb020'/%3E%3C/svg%3E" />
+<link rel="alternate icon" href="icon.svg" />
+<meta name="theme-color" content="#a8ff35" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -89,7 +92,10 @@
   }
   .nav { display: flex; align-items: center; gap: 28px; height: 60px; }
   .brand { font-family: var(--display); font-size: 21px; display: flex; align-items: center; gap: 9px; }
-  .drop { width: 11px; height: 11px; background: var(--acid); border-radius: 2px; }
+  /* Three blocks together, one stepped out — the mark is the product. */
+  .mark { display: inline-flex; width: 18px; height: 18px; }
+  .mark svg { width: 100%; height: 100%; fill: var(--acid); }
+  .mark .out { fill: var(--warn); }
   .nav-links { display: flex; gap: 22px; margin-left: auto; font-size: 14px; color: var(--dim); }
   .nav-links a:hover { color: var(--fg); }
 
@@ -219,9 +225,10 @@
 
 <header>
   <div class="shell nav">
-    <a class="brand" href="#top"><span class="drop"></span>Ichor</a>
+    <a class="brand" href="#top"><span class="mark" aria-hidden="true"><svg viewBox="0 0 32 32"><rect x="0" y="0" width="14" height="14" rx="1.5"/><rect x="16" y="0" width="14" height="14" rx="1.5"/><rect x="0" y="16" width="14" height="14" rx="1.5"/><rect class="out" x="20" y="20" width="12" height="12" rx="1.5"/></svg></span>Ichor</a>
     <nav class="nav-links">
       <a href="#problem">The problem</a>
+      <a href="#notagraph">The difference</a>
       <a href="#how">How it works</a>
       <a href="#allday">All day</a>
       <a href="#agents">Agents</a>
@@ -308,11 +315,75 @@
     </div>
   </section>
 
+  <!-- --------------------------------------------------- not a graph -->
+  <section id="notagraph">
+    <div class="shell">
+      <div class="section-head">
+        <span class="eyebrow">02 / The difference</span>
+        <h2>Ichor Is Not A Code Graph.</h2>
+        <p>
+          It keeps one. But the graph is not the product — it is the evidence. Tools like Graphify
+          map your codebase so you can query it instead of grepping. They are good at that, and
+          Ichor is not trying to be one.
+        </p>
+      </div>
+
+      <div class="grid grid-2">
+        <div class="card">
+          <span class="num">A CODE GRAPH ANSWERS</span>
+          <h3>"What Is Connected To What?"</h3>
+          <p>
+            You ask a question, it answers, you decide what to do with it. On demand, when you think
+            to run it. Broad — around forty languages, plus your docs and PDFs.
+          </p>
+        </div>
+        <div class="card">
+          <span class="num">ICHOR ANSWERS</span>
+          <h3>"Should This Edit Exist?"</h3>
+          <p>
+            One question, about the file your agent is writing right now. It runs whether you ask or
+            not, because it sits in the write path — before the file exists.
+          </p>
+        </div>
+      </div>
+
+      <div style="margin-top:36px">
+        <h3 style="margin-bottom:14px">Connected Is Not The Same As Necessary</h3>
+        <p style="color:var(--dim);font-size:16px;max-width:760px;line-height:1.6">
+          Your agent adds <code style="font-family:var(--mono);font-size:14px">/api/vendors/check-email</code>
+          during a duplicate-email fix. Ask any graph whether it relates to the task and every signal
+          says yes — same table, same folder, same service. It <em>is</em> related. So relatedness
+          gives you no reason to object.
+        </p>
+      </div>
+
+      <div class="terminal" style="margin-top:22px">
+        <div class="terminal-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span style="margin-left:8px">the question Ichor asks instead</span>
+        </div>
+<div class="terminal-body">the task's existing path:
+   <span class="ok">POST /api/vendors ────► createVendor ────► Vendor.email  (unique)</span>
+                                                   <span class="warn">▲</span>
+   the new endpoint:                               <span class="warn">│</span>
+   <span class="warn">POST /api/vendors/check-email ──────────────────┘</span>
+        <span class="muted">reaches the SAME rule by a SECOND road</span></div>
+      </div>
+
+      <p style="margin-top:22px;color:var(--dim);font-size:16px;max-width:760px;line-height:1.6">
+        The database already refuses duplicate emails, and the submit path already reaches that rule.
+        So the endpoint is connected, relevant, and <strong style="color:var(--fg);font-weight:400">unnecessary</strong>.
+        No amount of retrieval answers that, because it is not a retrieval question.
+      </p>
+
+    </div>
+  </section>
+
   <!-- ------------------------------------------------------------- how -->
   <section id="how">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">02 / How it works</span>
+        <span class="eyebrow">03 / How it works</span>
         <h2>A Task Boundary That Comes From The Code.</h2>
         <p>
           Not a folder rule. A real task crosses UI, API, service, database and tests — files that
@@ -370,7 +441,7 @@
   <section id="tests">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">03 / The two questions</span>
+        <span class="eyebrow">04 / The two questions</span>
         <h2>Connected Is Not The Same As Necessary.</h2>
         <p>
           A new <code style="font-family:var(--mono);font-size:14px">/check-email</code> endpoint
@@ -397,7 +468,7 @@
   <section id="verdicts">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">04 / Not a blocker</span>
+        <span class="eyebrow">05 / Not a blocker</span>
         <h2>It Asks Why. It Does Not Say No.</h2>
         <p>
           A tool that fires on every third edit gets uninstalled the same afternoon. Ichor is built
@@ -418,7 +489,7 @@
   <section id="allday">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">05 / All day, one chat</span>
+        <span class="eyebrow">06 / All day, one chat</span>
         <h2>The Boundary Follows The Conversation.</h2>
         <p>
           Nobody runs a command between tasks. You fix a bug at 9am and you are somewhere else
@@ -466,7 +537,7 @@
   <section id="agents">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">06 / Agents</span>
+        <span class="eyebrow">07 / Agents</span>
         <h2>One Layer, Underneath Your Agent.</h2>
         <p>
           Ichor is not a plugin for one tool. Hooks make sure the agent cannot forget it exists;
@@ -508,7 +579,7 @@
   <section id="proof">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">07 / Proof</span>
+        <span class="eyebrow">08 / Proof</span>
         <h2>Measured On Somebody Else's Code.</h2>
         <p>
           A tool that questions work you were right to do gets uninstalled the same afternoon. So
@@ -554,7 +625,7 @@
   <section id="install">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">08 / Install</span>
+        <span class="eyebrow">09 / Install</span>
         <h2>Three Commands, And No Task To Type.</h2>
         <p>Your code never leaves your machine. Ichor runs HydraDB locally, so the graph of your codebase stays on your disk. There is no account.</p>
       </div>
@@ -589,7 +660,7 @@
   <section id="limits">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">09 / Honestly</span>
+        <span class="eyebrow">10 / Honestly</span>
         <h2>What It Cannot Do.</h2>
         <p>A tool that claims to know where a task belongs should be precise about where it is blind.</p>
       </div>
@@ -611,7 +682,7 @@
 <footer>
   <div class="shell">
     <div class="footer-row">
-      <a class="brand" href="#top" style="font-size:17px"><span class="drop"></span>Ichor</a>
+      <a class="brand" href="#top" style="font-size:17px"><span class="mark" aria-hidden="true"><svg viewBox="0 0 32 32"><rect x="0" y="0" width="14" height="14" rx="1.5"/><rect x="16" y="0" width="14" height="14" rx="1.5"/><rect x="0" y="16" width="14" height="14" rx="1.5"/><rect class="out" x="20" y="20" width="12" height="12" rx="1.5"/></svg></span>Ichor</a>
       <span style="margin-left:auto"></span>
       <a href="https://github.com/rohit-jsfreaky/ichor">GitHub</a>
       <a href="https://github.com/hydra-db/hydradb">HydraDB</a>

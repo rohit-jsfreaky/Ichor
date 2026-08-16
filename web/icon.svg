@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Ichor">
+  <!--
+    Three blocks in place, one stepped out.
+
+    The mark IS the product: a task holds together as one solid shape, and the
+    piece that leaves it is a different colour because that is the only moment
+    Ichor ever speaks. Blocky and grid-aligned to sit beside HydraDB's pixel
+    family, but deliberately not their pinwheel — this page credits HydraDB, and
+    a recoloured copy of their mark would read as impersonation.
+  -->
+  <rect x="0"  y="0"  width="14" height="14" rx="1.5" fill="#a8ff35"/>
+  <rect x="16" y="0"  width="14" height="14" rx="1.5" fill="#a8ff35"/>
+  <rect x="0"  y="16" width="14" height="14" rx="1.5" fill="#a8ff35"/>
+  <rect x="20" y="20" width="12" height="12" rx="1.5" fill="#ffb020"/>
+</svg>

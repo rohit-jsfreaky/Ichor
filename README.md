@@ -1,3 +1,5 @@
+<img src="web/icon.svg" width="48" height="48" alt="" />
+
 # Ichor
 
 **You asked for three files. It changed twenty.**
@@ -36,6 +38,48 @@ There is no task to type. Ichor takes the job from what you already said to your
 > Built for [Hack Hydra](https://hackhydra.hydradb.com/) 2026 · Track 02 · solo.
 
 ---
+
+## "Isn't this just a code graph?"
+
+No. Ichor keeps one, but the graph is not the product — it is the evidence.
+
+Code-graph tools like [Graphify](https://github.com/Graphify-Labs/graphify) map a codebase so you can **query it instead of grepping**. You ask, it answers, and you decide what to do. They are good at that, they cover ~40 languages and your docs and PDFs too, and Ichor is not trying to be one.
+
+Ichor answers a different question, and only one:
+
+> **Should this specific edit, that your agent is about to write, be part of the job you asked for?**
+
+That is not a retrieval question, and three things follow from it.
+
+**It runs whether you ask or not.** A graph tool is a library the agent consults when it chooses to. Ichor sits in the write path — every edit goes through it, before the file exists.
+
+**It knows what you are working on.** No code graph has a notion of today's task. Ichor reads it from your prompt, keeps it across the conversation, and moves it when you switch jobs. That boundary is the thing that does not exist elsewhere.
+
+**Connected is not the same as necessary.** This is the real difference, and it is easiest to see in an example.
+
+Your agent adds `/api/vendors/check-email` during a duplicate-email fix. Ask *any* graph whether it relates to the task:
+
+```
+check-email/route.ts
+  ├── queries Vendor            ✓ same table as the task
+  ├── sits in api/vendors/      ✓ same folder
+  └── imports the vendor service ✓ same code
+```
+
+Everything says **yes, related** — and it is. So relatedness gives you no reason to object. Ichor asks the next question instead:
+
+```
+the task's existing path:
+   POST /api/vendors ────► createVendor ────► Vendor.email  (unique)
+                                                   ▲
+   the new endpoint:                               │
+   POST /api/vendors/check-email ──────────────────┘
+        reaches the SAME rule by a SECOND road
+```
+
+The database already refuses duplicate emails, and the submit path already reaches that rule. So the endpoint is connected, relevant, and **unnecessary** — a second enforcement of something already enforced.
+
+They solve different problems. You could reasonably run both.
 
 ## How it decides
 

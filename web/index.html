@@ -114,6 +114,16 @@
   /* padding-block, not the shorthand — .hero sits ON .shell and the shorthand
      would wipe the 24px gutter that keeps text off the edge on a phone. */
   .hero { padding-block: 92px 72px; }
+  .keynote {
+    margin-top: 26px; padding: 22px 24px;
+    border: 1px solid var(--acid-dim); border-radius: 12px;
+    background: rgba(168,255,53,.045);
+  }
+  .keynote .num { color: var(--acid); }
+  .keynote h3 { font-size: 18px; margin-top: 10px; }
+  .keynote p { color: var(--dim); font-size: 15px; margin-top: 10px; line-height: 1.65; max-width: 78ch; }
+  .keynote code { font-family: var(--mono); font-size: 13.5px; color: var(--acid); }
+
   .banner {
     display: inline-flex; align-items: center; gap: 8px;
     font-size: 14px; color: var(--acid); margin-bottom: 28px;
@@ -227,11 +237,10 @@
   <div class="shell nav">
     <a class="brand" href="#top"><span class="mark" aria-hidden="true"><svg viewBox="0 0 32 32"><rect x="0" y="0" width="14" height="14" rx="1.5"/><rect x="16" y="0" width="14" height="14" rx="1.5"/><rect x="0" y="16" width="14" height="14" rx="1.5"/><rect class="out" x="20" y="20" width="12" height="12" rx="1.5"/></svg></span>Ichor</a>
     <nav class="nav-links">
-      <a href="#problem">The problem</a>
       <a href="#notagraph">The difference</a>
       <a href="#how">How it works</a>
-      <a href="#allday">All day</a>
-      <a href="#agents">Agents</a>
+      <a href="#says">What it says</a>
+      <a href="#tools">Ask the graph</a>
       <a href="#proof">Proof</a>
       <a href="#install">Install</a>
       <a href="./docs.html">Docs</a>
@@ -247,8 +256,8 @@
     <div class="banner">Built on HydraDB for Hack Hydra 2026 →</div>
     <h1>You Asked For Three Files.<br />It Changed Twenty.</h1>
     <p class="lede">
-      Ichor watches your AI coding agent while it works, and challenges it the moment it goes past
-      the job you actually gave it — not at review time, when the twenty files are already written.
+      Ichor watches your coding agent as it works, catches unnecessary scope expansion, and
+      challenges it before a small fix turns into a twenty-file mess.
     </p>
     <div class="cta">
       <a class="btn btn-primary" href="#install">Get started</a>
@@ -289,94 +298,123 @@
   <section id="problem">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">01 / The problem</span>
-        <h2>Agents Are Good At Code. Not At Staying Proportional.</h2>
+        <span class="eyebrow">The problem</span>
+        <h2>The Code Works. The Change Is Too Big.</h2>
         <p>
-          The change usually works. It is just far bigger than what you asked for — riskier, harder
-          to review, and full of decisions nobody made on purpose.
+          Nobody reviews a twenty-file diff properly at 6pm. So the extra endpoint ships, and you
+          find out what it does three weeks later.
         </p>
       </div>
       <div class="grid grid-3">
         <div class="card">
           <span class="num">WHAT YOU ASKED</span>
           <h3>One Small Fix</h3>
-          <p>Handle a duplicate email properly instead of returning a 500. Three files, one existing code path, maybe a test.</p>
+          <p>Handle a duplicate email instead of returning a 500. Three files, one code path that already exists.</p>
         </div>
         <div class="card">
           <span class="num">WHAT YOU GOT</span>
           <h3>A New Flow</h3>
-          <p>A new endpoint, pre-submit validation, new client state, a shared utility, a changed API contract, twenty files.</p>
+          <p>A new endpoint, pre-submit validation, new client state, a shared utility, a changed API contract.</p>
         </div>
         <div class="card">
           <span class="num">WHAT IT COSTS</span>
-          <h3>The Review</h3>
-          <p>You now review an architecture decision you never made, at the exact moment you have the least context on it.</p>
+          <h3>Your Review</h3>
+          <p>An architecture decision you never made, handed to you at the moment you have least context on it.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- --------------------------------------------------- not a graph -->
+  <!-- ------------------------------------------------------ not a graph -->
   <section id="notagraph">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">02 / The difference</span>
-        <h2>Ichor Is Not A Code Graph.</h2>
+        <span class="eyebrow">The difference</span>
+        <h2>It Is Not A Code Graph. It Uses One.</h2>
         <p>
-          It keeps one. But the graph is not the product — it is the evidence. Tools like Graphify
-          map your codebase so you can query it instead of grepping. They are good at that, and
-          Ichor is not trying to be one.
+          Ichor keeps a graph, but the graph is not the product — it is the evidence. Code-graph
+          tools answer <em>where is this?</em> Ichor answers a question none of them ask.
         </p>
       </div>
 
       <div class="grid grid-2">
         <div class="card">
-          <span class="num">A CODE GRAPH ANSWERS</span>
-          <h3>"What Is Connected To What?"</h3>
+          <span class="num">A CODE GRAPH</span>
+          <h3>Where Is This, And What Relates To It?</h3>
           <p>
-            You ask a question, it answers, you decide what to do with it. On demand, when you think
-            to run it. Broad — around forty languages, plus your docs and PDFs.
+            Tools like <a href="https://github.com/Graphify-Labs/graphify" style="color:var(--acid)">Graphify</a>
+            map a codebase so you can query it instead of grepping. Around 40 languages, your docs
+            and PDFs too. You ask, it answers, you decide. They are good at that, and Ichor is not
+            trying to be one.
           </p>
         </div>
         <div class="card">
-          <span class="num">ICHOR ANSWERS</span>
-          <h3>"Should This Edit Exist?"</h3>
+          <span class="num">ICHOR</span>
+          <h3>Should This Edit Be Part Of This Job?</h3>
           <p>
-            One question, about the file your agent is writing right now. It runs whether you ask or
-            not, because it sits in the write path — before the file exists.
+            Not a retrieval question. It runs on every write whether the agent asks or not, it
+            knows what you are working on today, and it has to justify a challenge with a path it
+            can point at. TypeScript and JavaScript only — that is the price of the depth.
           </p>
         </div>
       </div>
 
-      <div style="margin-top:36px">
-        <h3 style="margin-bottom:14px">Connected Is Not The Same As Necessary</h3>
-        <p style="color:var(--dim);font-size:16px;max-width:760px;line-height:1.6">
-          Your agent adds <code style="font-family:var(--mono);font-size:14px">/api/vendors/check-email</code>
-          during a duplicate-email fix. Ask any graph whether it relates to the task and every signal
-          says yes — same table, same folder, same service. It <em>is</em> related. So relatedness
-          gives you no reason to object.
+      <div class="grid grid-2" style="margin-top:2px">
+        <div class="card">
+          <span class="num">IT RESOLVES, IT DOES NOT MATCH</span>
+          <h3>Names Are Bound, Not Guessed</h3>
+          <p>
+            <code>import { send } from './email'</code> plus that module's export list <em>is</em>
+            the answer — so a call becomes an edge to a declaration Ichor can name, through
+            re-exports and namespace imports. Never a same-name coincidence, and never a match
+            inside a comment or a string.
+          </p>
+        </div>
+        <div class="card">
+          <span class="num">AND IT ADMITS THE GAPS</span>
+          <h3>7,178 Call Sites It Would Not Guess At</h3>
+          <p>
+            On papermark, that many calls could not be resolved to a declaration — so they are
+            <strong style="color:var(--fg);font-weight:400">counted and reported</strong>, not
+            invented. The graph is a floor, never an inflated one. A wrong edge would be quoted back
+            as evidence, and evidence has to be true.
+          </p>
+        </div>
+      </div>
+
+      <div class="section-head" style="margin-top:56px">
+        <h2 style="font-size:clamp(22px,3vw,30px)">Connected Is Not The Same As Necessary.</h2>
+        <p>
+          This is the difference in one example, and it is the whole reason a graph is needed
+          rather than a search.
         </p>
       </div>
 
-      <div class="terminal" style="margin-top:22px">
+      <p class="muted" style="max-width:74ch;margin:0 0 18px">
+        Your agent adds <code>/api/vendors/check-email</code> during a duplicate-email fix. Ask any
+        search tool whether it relates to the task and everything says yes — same table, same
+        folder, same service. All true. So relatedness gives you no reason to object.
+      </p>
+
+      <div class="terminal">
         <div class="terminal-bar">
           <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span style="margin-left:8px">the question Ichor asks instead</span>
+          <span style="margin-left:8px">the question Ichor asks next</span>
         </div>
 <div class="terminal-body">the task's existing path:
    <span class="ok">POST /api/vendors ────► createVendor ────► Vendor.email  (unique)</span>
-                                                   <span class="warn">▲</span>
-   the new endpoint:                               <span class="warn">│</span>
+                                                   ▲
+   the new endpoint:                               │
    <span class="warn">POST /api/vendors/check-email ──────────────────┘</span>
-        <span class="muted">reaches the SAME rule by a SECOND road</span></div>
+        reaches the SAME rule by a SECOND road</div>
       </div>
 
-      <p style="margin-top:22px;color:var(--dim);font-size:16px;max-width:760px;line-height:1.6">
-        The database already refuses duplicate emails, and the submit path already reaches that rule.
-        So the endpoint is connected, relevant, and <strong style="color:var(--fg);font-weight:400">unnecessary</strong>.
-        No amount of retrieval answers that, because it is not a retrieval question.
+      <p class="muted" style="margin-top:22px;max-width:74ch">
+        The database already refuses duplicate emails, and the submit path already reaches that
+        rule. So the endpoint is connected, relevant, and <strong style="color:var(--fg);font-weight:400">unnecessary</strong>
+        — a second enforcement of something already enforced. No amount of retrieval makes that
+        judgement for you. They solve different problems, and you could reasonably run both.
       </p>
-
     </div>
   </section>
 
@@ -384,214 +422,140 @@
   <section id="how">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">03 / How it works</span>
-        <h2>A Task Boundary That Comes From The Code.</h2>
+        <span class="eyebrow">How it works</span>
+        <h2>It Knows What Your Code Actually Connects To.</h2>
         <p>
-          Not a folder rule. A real task crosses UI, API, service, database and tests — files that
-          share no words and no directory. What connects them is the structure of the program.
+          Not keyword matching. Ichor compiles your codebase into a graph of what calls what, which
+          endpoints reach which tables, and which types everything depends on — then judges edits
+          against it.
         </p>
       </div>
       <div class="steps">
         <div class="step">
-          <div class="n">1</div>
+          <span class="n">1</span>
           <div>
-            <h3>Read the codebase</h3>
-            <p>The TypeScript compiler resolves every function, call, route and database model. No guessing, and no LLM anywhere near the structure.</p>
+            <h3>It reads your repo, once</h3>
+            <p>
+              The TypeScript compiler resolves every call, import, route and Prisma model into a
+              graph stored in a local HydraDB. 25 seconds for 1,362 files, then seconds to keep up.
+            </p>
           </div>
         </div>
         <div class="step">
-          <div class="n">2</div>
+          <span class="n">2</span>
           <div>
-            <h3>Store it as a graph in HydraDB</h3>
-            <p>Functions call functions, routes are handled by functions, functions touch models. That graph is the evidence for everything that follows.</p>
+            <h3>Your prompt draws a boundary</h3>
+            <p>
+              Ichor finds where your task lives and walks outward through real call edges. Name a
+              file and the boundary is that file and its neighbours &mdash; <strong style="color:var(--fg);font-weight:400">9 functions instead of 135</strong>
+              on a real project. No command to type; it reads the conversation.
+            </p>
           </div>
         </div>
         <div class="step">
-          <div class="n">3</div>
+          <span class="n">3</span>
           <div>
-            <h3>Take the task from what you asked</h3>
-            <p>You never type a task. Ichor reads the prompt you gave the agent, anchors it to real routes, functions and fields, then walks outward through actual call structure.</p>
-          </div>
-        </div>
-        <div class="step">
-          <div class="n">4</div>
-          <div>
-            <h3>Watch every edit, stay quiet</h3>
-            <p>A pre-edit hook fires before the agent writes anything. Inside the boundary, Ichor says nothing at all. Silence is the normal state.</p>
-          </div>
-        </div>
-        <div class="step">
-          <div class="n">5</div>
-          <div>
-            <h3>Challenge, then listen</h3>
-            <p>When work expands, Ichor asks why and shows the path it walked. The agent can argue back over MCP — and the graph, not the argument, decides.</p>
-          </div>
-        </div>
-        <div class="step">
-          <div class="n">6</div>
-          <div>
-            <h3>Redraw itself between turns</h3>
-            <p>When the agent stops talking, the graph rebuilds in the background. When you type again, Ichor checks whether you are still on the same job.</p>
+            <h3>Edits outside it get questioned</h3>
+            <p>
+              Before the write lands, not after. And it has to show its evidence &mdash; the
+              existing path that already does the job, named function by named function.
+            </p>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ----------------------------------------------------------- tests -->
-  <section id="tests">
+  <!-- ----------------------------------------------------------- says -->
+  <section id="says">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">04 / The two questions</span>
-        <h2>Connected Is Not The Same As Necessary.</h2>
-        <p>
-          A new <code style="font-family:var(--mono);font-size:14px">/check-email</code> endpoint
-          imports your database client, queries the right model, and sits with the other vendor
-          routes. Every connectedness check passes. It is still the wrong change.
-        </p>
-      </div>
-      <div class="grid grid-2">
-        <div class="card">
-          <span class="num">TEST ONE</span>
-          <h3>Is It Connected To The Task?</h3>
-          <p>Reachability across the call graph. A new file is judged by what it reaches, never by the fact that it is new — real work creates new files constantly.</p>
-        </div>
-        <div class="card">
-          <span class="num">TEST TWO</span>
-          <h3>Does A Path Already Do This?</h3>
-          <p>The one nothing else does. If the submit path already reaches the uniqueness constraint, a second endpoint is a second flow for a rule already enforced.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- --------------------------------------------------------- verdicts -->
-  <section id="verdicts">
-    <div class="shell">
-      <div class="section-head">
-        <span class="eyebrow">05 / Not a blocker</span>
-        <h2>It Asks Why. It Does Not Say No.</h2>
+        <span class="eyebrow">What it says</span>
+        <h2>It Asks Why. It Never Says No.</h2>
         <p>
           A tool that fires on every third edit gets uninstalled the same afternoon. Ichor is built
-          to be quiet, and to be wrong gracefully when it is wrong.
+          to be quiet — and to lose the argument gracefully when it is wrong.
         </p>
       </div>
       <div class="states">
-        <div class="state"><span class="k ok">EXPECTED</span><span class="v">Inside the neighbourhood. Ichor says nothing.</span></div>
-        <div class="state"><span class="k ok">CONNECTED</span><span class="v">Just outside, with a real path back and the same data. The boundary grows on its own.</span></div>
-        <div class="state"><span class="k warn">SUSPICIOUS</span><span class="v">Weak or no connection. Ichor asks why, and shows the evidence it used.</span></div>
-        <div class="state"><span class="k ok">JUSTIFIED</span><span class="v">The agent explained and the codebase backs it up. The boundary grows.</span></div>
-        <div class="state"><span class="k muted">HUMAN REVIEW</span><span class="v">Plausible but unverifiable. That is your call, not Ichor's.</span></div>
+        <div class="state"><span class="k ok">EXPECTED</span><span class="v">Inside the boundary. Ichor says nothing at all.</span></div>
+        <div class="state"><span class="k ok">CONNECTED</span><span class="v">Just outside, with a real path back. The boundary grows on its own.</span></div>
+        <div class="state"><span class="k warn">SUSPICIOUS</span><span class="v">No real connection. Ichor asks why, and shows the evidence it used.</span></div>
+        <div class="state"><span class="k ok">JUSTIFIED</span><span class="v">The agent explained, the codebase backs it up. The boundary grows.</span></div>
+        <div class="state"><span class="k muted">YOUR CALL</span><span class="v">Plausible but unverifiable. Ichor asks you instead of deciding.</span></div>
       </div>
+      <p class="muted" style="margin-top:22px;max-width:70ch">
+        It never blocks a prompt and it never asks twice about the same file. Write the file anyway
+        and it lands — Ichor just remembers that the reason was never given.
+      </p>
     </div>
   </section>
 
-  <!-- ------------------------------------------------------- all day -->
+  <!-- -------------------------------------------------------- all day -->
   <section id="allday">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">06 / All day, one chat</span>
-        <h2>The Boundary Follows The Conversation.</h2>
+        <span class="eyebrow">All day, one session</span>
+        <h2>Move On, And It Moves With You.</h2>
         <p>
-          Nobody runs a command between tasks. You fix a bug at 9am and you are somewhere else
-          entirely by 2pm — in the same conversation. A boundary drawn for the morning would spend
-          the afternoon questioning every edit, and you would switch it off by lunch.
+          Nobody runs a CLI command between tasks. A boundary drawn at 9am would still be policing
+          vendor code at 2pm while you are deep in billing, arguing with every edit.
         </p>
       </div>
-      <div class="terminal" style="margin-top:0">
+      <div class="terminal">
         <div class="terminal-bar">
           <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span style="margin-left:8px">one session, hours apart</span>
+          <span style="margin-left:8px">.ichor/hook.log — the same session, two hours later</span>
         </div>
-<div class="terminal-body"><span class="muted">you  ›</span> fix the duplicate email crash in vendor onboarding
-  <span class="ok">[ichor] task set — 14 functions, data: Vendor</span>
+<div class="terminal-body"><span class="muted">you ›</span> <span class="u">now fix the invoice totals in lib/billing/invoice.ts</span>
 
-<span class="muted">you  ›</span> continue
-  <span class="muted">[ichor] nothing changes — that names no part of the codebase</span>
+<span class="ok">prompt: NEW</span> — names lib/billing/invoice.ts outright, which the boundary does not cover
+<span class="ok">prompt: boundary set</span> — 14 functions in 0.1s
 
-<span class="muted">···  hours later, same conversation  ···</span>
+<span class="muted">claude ›</span> editing lib/billing/invoice.ts             <span class="ok">✓ EXPECTED</span>
+<span class="muted">claude ›</span> editing src/lib/vendors/create.ts          <span class="warn">⚠ SUSPICIOUS</span>
 
-<span class="muted">you  ›</span> now fix the rounding on billing invoices
-  <span class="ok">[ichor] new task — 3 functions, data: Invoice</span></div>
+<span class="muted">note ›</span> vendor code was in scope this morning. It is not the job now.</div>
       </div>
-      <div class="grid grid-3" style="margin-top:28px">
-        <div class="card">
-          <span class="num">IT NOTICES</span>
-          <h3>You Changed Subject</h3>
-          <p>A prompt pointing somewhere the boundary does not cover redraws it. One that points inside just carries on.</p>
-        </div>
-        <div class="card">
-          <span class="num">IT IGNORES</span>
-          <h3>Everything Else</h3>
-          <p>"Continue", "that didn't work", a pasted stack trace, a question. Anything ambiguous changes nothing at all.</p>
-        </div>
-        <div class="card">
-          <span class="num">IT TELLS THE AGENT</span>
-          <h3>Before It Starts</h3>
-          <p>Each turn begins with the boundary in the agent's context, so over-reach is mostly prevented rather than punished.</p>
-        </div>
-      </div>
+      <p class="muted" style="margin-top:22px;max-width:70ch">
+        Ask a question instead of giving an instruction and the boundary does not move at all —
+        you are not changing anything, so there is nothing to protect.
+      </p>
     </div>
   </section>
 
-  <!-- ---------------------------------------------------------- agents -->
-  <section id="agents">
+  <!-- ---------------------------------------------------------- tools -->
+  <section id="tools">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">07 / Agents</span>
-        <h2>One Layer, Underneath Your Agent.</h2>
+        <span class="eyebrow">Ask the graph</span>
+        <h2>Your Agent Gets To Use It Too.</h2>
         <p>
-          Ichor is not a plugin for one tool. Hooks make sure the agent cannot forget it exists;
-          MCP lets the agent collaborate with it. New agent, new adapter — same engine.
+          The same graph that judges edits will answer questions. Your agent stops guessing at grep
+          patterns and asks what the compiler already knows.
         </p>
       </div>
-      <table>
-        <thead>
-          <tr><th>Agent</th><th>Support</th><th>How</th></tr>
-        </thead>
-        <tbody>
-          <tr><td class="agent">Claude Code</td><td class="level">Full</td><td class="how">Pre-edit hook + MCP. Challenged before the write lands.</td></tr>
-          <tr><td class="agent">Codex CLI</td><td class="level">Full</td><td class="how">Pre-edit hook + MCP. Same mechanism, same decisions.</td></tr>
-          <tr><td class="agent">Cursor · Windsurf · Gemini CLI · Cline</td><td class="level soon">Coming</td><td class="how">Same adapter interface.</td></tr>
-        </tbody>
-      </table>
-
-      <h3 style="margin-top:44px">Half Of It Is Not Policing At All</h3>
-      <p style="margin-top:14px;max-width:700px;color:var(--dim);line-height:1.7">
-        Your agent is about to go and grep for something the graph already knows. Before writing a
-        line, a real Codex run searched the repo for five words, got <strong style="color:var(--fg);font-weight:400">116
-        hits</strong> and read <strong style="color:var(--fg);font-weight:400">six entire files</strong>
-        — working out where the task lived. Ichor had that answer in <strong style="color:var(--acid);font-weight:400">14ms</strong>.
-      </p>
-      <div class="grid grid-2" style="margin-top:22px">
+      <div class="grid grid-3">
         <div class="card">
           <span class="num">ICHOR_FIND</span>
-          <h3>Where Does This Live?</h3>
-          <p>Describe it in plain words — "the place invites are created". You never have to guess a name, because it searches structure, not text.</p>
+          <h3>Where does this live?</h3>
+          <p>Describe it in plain words — "the place invites are created". It searches structure, so it finds names you could not have guessed and skips matches in comments.</p>
         </div>
         <div class="card">
           <span class="num">ICHOR_IMPACT</span>
-          <h3>What Breaks If I Change It?</h3>
-          <p>Who calls it, which endpoints end up running it, which tables are at stake, and who depends on its shape. Ask before editing, not after.</p>
-        </div>
-        <div class="card">
-          <span class="num">ICHOR_CALLERS</span>
-          <h3>Who Uses This?</h3>
-          <p>Every function that reaches it, and the endpoints behind them. From the compiler, so it finds callers a text search misses and skips matches inside comments.</p>
+          <h3>What breaks if I change it?</h3>
+          <p>Callers, the endpoints that end up running it, the tables at stake, and every function depending on a type's shape. One call, no grep.</p>
         </div>
         <div class="card">
           <span class="num">ICHOR_PATHS</span>
-          <h3>How Do We Reach This Data?</h3>
-          <p>Which endpoints can end up touching a table, and through which function. No file search can answer that one.</p>
+          <h3>How is this table reached?</h3>
+          <p>Which endpoints, through which functions. Useful before adding a second way to write data that already has one. No file search can answer it.</p>
         </div>
       </div>
-
-      <p style="margin-top:26px;max-width:700px;color:var(--faint);font-size:14px;line-height:1.7">
-        A live Claude Code session, told to use only these tools, answered "where is duplicate email
-        handling, and what breaks if I change createVendor?" in nine calls — and found that this
-        repo's own <code style="font-family:var(--mono);font-size:13px">DuplicateVendorEmailError</code>
-        is never called by anything. A grep for "duplicate" finds that file and tells you nothing
-        about whether it is wired in.
+      <p class="muted" style="margin-top:22px;max-width:70ch">
+        Asked <em>"what breaks if I delete the useAuth hook?"</em> on a real project, an agent
+        answered with <strong style="color:var(--fg);font-weight:400">one <code>ichor_impact</code> call and nothing else</strong> —
+        no grep, no file reads.
       </p>
     </div>
   </section>
@@ -600,12 +564,11 @@
   <section id="proof">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">08 / Proof</span>
+        <span class="eyebrow">Proof</span>
         <h2>Measured On Somebody Else's Code.</h2>
         <p>
-          A tool that questions work you were right to do gets uninstalled the same afternoon. So
-          that is the thing worth measuring — and passing your own tests on your own demo proves
-          nothing about it.
+          The number that decides whether a tool like this survives is how often it interrupts work
+          you were right to do. Passing your own tests on your own demo proves nothing about it.
         </p>
       </div>
 
@@ -613,87 +576,109 @@
         <div class="card">
           <span class="num">FALSE ALARMS</span>
           <div class="stat">12.8%</div>
-          <p class="stat-note">Share of edits a developer genuinely had to make that Ichor would have interrupted. By file type: 10 of 45 <code>.ts</code>, 1 of 26 <code>.tsx</code>, 0 of 2 <code>.prisma</code>, and none at all outside TypeScript.</p>
+          <p class="stat-note">Share of edits a developer genuinely had to make that Ichor would have interrupted — about one in eight. Replayed through the real classifier, not estimated.</p>
         </div>
         <div class="card">
           <span class="num">EVIDENCE</span>
           <div class="stat">86</div>
-          <p class="stat-note">Files changed across 30 real commits from a real product, replayed through the real classifier. Each commit message is the task; the files it changed are the truth. Every file type, not just the ones Ichor reads.</p>
+          <p class="stat-note">Files across 30 real commits from a real product. Each commit message is the task; the files it changed are the truth. Every file type, not just the ones Ichor reads.</p>
         </div>
         <div class="card">
           <span class="num">SPEED</span>
           <div class="stat">6s</div>
-          <p class="stat-note">To catch up after you edit a file in a 1,362-file codebase. A first full read of that repo takes 25 seconds, and the largest tested — 7,735 files — is read at Node's default heap.</p>
+          <p class="stat-note">To catch up after you edit a file in a 1,362-file codebase. The largest repo tested — 7,735 files — is read at Node's default heap.</p>
         </div>
       </div>
 
-      <p style="margin-top:26px;color:var(--dim);font-size:15px;max-width:760px;line-height:1.6">
-        Passing your own tests on your own demo cannot tell you this. Ichor's own suite runs against an
-        eleven-file app, so the measurement that matters is replayed against somebody else's product:
-        each commit message is the task, and the files it changed are what a developer genuinely had to
-        touch. Reproduce it with
-        <code style="font-family:var(--mono);font-size:13px">scripts/ground-truth.ts</code>.
+      <p class="muted" style="margin-top:26px;max-width:74ch">
+        Every number here is reproducible from this repository. The measurement harness is in
+        <code>scripts/</code>, and the suite that matters most exists because six others passed while
+        eleven real bugs were live — they all ran against an eleven-file demo.
       </p>
     </div>
   </section>
 
-  <!-- --------------------------------------------------------- install -->
+  <!-- -------------------------------------------------------- install -->
   <section id="install">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">09 / Install</span>
+        <span class="eyebrow">Install</span>
         <h2>Three Commands, And No Task To Type.</h2>
-        <p>Your code never leaves your machine. Ichor runs HydraDB locally, so the graph of your codebase stays on your disk. There is no account.</p>
+        <p>
+          Needs Docker for the local graph database, and a TypeScript or JavaScript repo. Your code
+          never leaves your machine.
+        </p>
       </div>
-      <div class="terminal" style="margin-top:0">
+      <div class="terminal">
         <div class="terminal-bar">
           <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span style="margin-left:8px">demo/ — real output, not a mockup</span>
+          <span style="margin-left:8px">your-repo</span>
         </div>
-<div class="terminal-body"><span class="ok">$</span> npm i -g ichor-cli
+<div class="terminal-body"><span class="prompt">$</span> npm i -g ichor-cli
+<span class="prompt">$</span> ichor init          <span class="muted"># hooks for Claude Code and Codex</span>
+<span class="prompt">$</span> ichor up            <span class="muted"># local HydraDB, binds to 127.0.0.1</span>
+<span class="prompt">$</span> ichor watch         <span class="muted"># reads your repo, then follows the conversation</span>
 
-<span class="ok">$</span> ichor init
-  <span class="muted">Claude Code: PreToolUse, UserPromptSubmit, Stop -> .claude/settings.json</span>
-  <span class="muted">Codex:       PreToolUse, UserPromptSubmit, Stop -> .codex/hooks.json</span>
-  <span class="muted">MCP server:  registered                        -> .mcp.json</span>
-
-<span class="ok">$</span> ichor up
-  <span class="muted">HydraDB and MinIO, on your machine.</span>
-
-<span class="ok">$</span> ichor watch
-  <span class="muted">reading the codebase… 17 functions, 10 calls, 2 routes</span>
-
-  <span class="ok">Watching. Run your agent as usual — Ichor picks the task up from your prompts.</span></div>
+<span class="muted">Watching. Run your agent as usual — Ichor picks the task up from your prompts.</span></div>
       </div>
-      <p style="margin-top:22px;color:var(--faint);font-size:14px">
-        Requires Node 20+, Docker, and a TypeScript repo — ideally Next.js with Prisma. One database per repo.
-        Prefer to name the task yourself? <code style="font-family:var(--mono)">ichor start "…"</code> still does exactly that.
-      </p>
+      <div class="grid grid-2" style="margin-top:26px">
+        <div class="card">
+          <span class="num">WORKS WITH</span>
+          <h3>Claude Code and Codex CLI</h3>
+          <p>Both get the full thing — challenges before the write lands, plus the graph tools. Cursor, Windsurf, Gemini CLI and Cline use the same adapter interface and are next.</p>
+        </div>
+        <div class="card">
+          <span class="num">NO ACCOUNT</span>
+          <h3>Your code stays on your machine</h3>
+          <p>HydraDB and MinIO run locally through Docker, every port binds to <code style="font-family:var(--mono);font-size:13px">127.0.0.1</code>, and there is no telemetry. Nothing is uploaded to run Ichor.</p>
+        </div>
+      </div>
+
+      <div class="keynote">
+        <span class="num">RECOMMENDED — UNLOCK THE JUDGE</span>
+        <h3>Add an OpenRouter key and Ichor can weigh an argument, not just the structure.</h3>
+        <p>
+          Every boundary, every verdict, every piece of evidence and all nine tools work with
+          <strong style="color:var(--fg);font-weight:400">no key at all</strong> — that is deliberate,
+          and it is why there is no signup. A key adds the one thing structure cannot do: when your
+          agent <em>argues</em> that an expansion is genuinely necessary, that argument gets weighed
+          against the evidence the graph produced, instead of the question coming to you.
+        </p>
+        <p>
+          <strong style="color:var(--fg);font-weight:400">It is cheap on purpose.</strong> A small
+          model, called only when an argument has actually been made — never on an ordinary edit —
+          and capped per task <em>and</em> per file. Exercising every path in Ichor end to end costs
+          well under a dollar, so a spare key with a couple of dollars on it is plenty.
+        </p>
+        <p style="margin-top:14px">
+          <code>$ ichor key sk-or-…</code> &nbsp;·&nbsp; keys from
+          <a href="https://openrouter.ai/keys" style="color:var(--acid)">openrouter.ai/keys</a>,
+          stored in <code>~/.ichor/</code> outside every repository so it cannot be committed by accident.
+        </p>
+      </div>
     </div>
   </section>
 
-  <!-- ---------------------------------------------------------- limits -->
+  <!-- --------------------------------------------------------- limits -->
   <section id="limits">
     <div class="shell">
       <div class="section-head">
-        <span class="eyebrow">10 / Honestly</span>
+        <span class="eyebrow">Honest limits</span>
         <h2>What It Cannot Do.</h2>
-        <p>A tool that claims to know where a task belongs should be precise about where it is blind.</p>
+        <p>
+          A tool that claims to know where a task belongs should be precise about where it is blind.
+        </p>
       </div>
       <ul class="plain">
         <li><strong style="color:var(--fg);font-weight:400">TypeScript and JavaScript only.</strong> Python is next. Nothing else is claimed.</li>
-        <li><strong style="color:var(--fg);font-weight:400">It still questions about one edit in eight</strong> that a developer would have made anyway. Measured, not estimated. Every remaining case is a file the boundary did not reach, rather than a file type it refuses to read.</li>
-        <li><strong style="color:var(--fg);font-weight:400">Describe a task in words and the scope is a superset; name the file and it is not.</strong> A prompt naming no path is matched on its words, and on a large repo that reaches wider than the job does — which means fewer challenges, not more, and the one-in-eight figure above is what it costs. Name a path and Ichor scopes to that file and its graph neighbours instead: measured live on a 1,362-file repo, 800 functions of guesswork down to the 9 in the file you pointed at.</li>
-        <li><strong style="color:var(--fg);font-weight:400">One database per repository.</strong> Projects never bleed into each other — that is tested with four at once — but HydraDB has no property indexes, so scoping a query to one repo is a scan that grows with the whole database. Three share one comfortably; more will not.</li>
-        <li><strong style="color:var(--fg);font-weight:400">A first read of a large repository takes tens of seconds.</strong> 25s for 1,362 files, 82s for 7,735. Once, then refreshes are seconds.</li>
-        <li><strong style="color:var(--fg);font-weight:400">Static analysis.</strong> Dynamic dispatch and runtime-constructed calls are invisible, so results are a floor and never a ceiling.</li>
-        <li><strong style="color:var(--fg);font-weight:400">Shell writes cannot be challenged, only accounted for.</strong> Ichor hooks the agents' edit tools, and a file written by <code style="font-family:var(--mono);font-size:13px">cat &gt;</code> or a codegen script never announces itself — you would have to predict what an arbitrary command will write. So at the end of the turn Ichor names every file that changed without ever reaching a verdict. It cannot ask why in the moment; it will not pretend it was asked.</li>
-        <li><strong style="color:var(--fg);font-weight:400">Task detection can be wrong.</strong> It moves the boundary only when a prompt points somewhere the boundary does not cover. <code style="font-family:var(--mono);font-size:13px">ichor status</code> always shows what it decided, and naming a task by hand overrides it.</li>
-        <li><strong style="color:var(--fg);font-weight:400">The graph is rebuilt between turns, not during them.</strong> Within a single turn it can be a few edits behind.</li>
-        <li><strong style="color:var(--fg);font-weight:400">One conversation at a time per repo.</strong> Two agent sessions in the same checkout share one boundary.</li>
-        <li><strong style="color:var(--fg);font-weight:400">The boundary is an expectation, not a fact.</strong> It is designed to grow when the work justifies it.</li>
-        <li><strong style="color:var(--fg);font-weight:400">Ichor can be wrong.</strong> When it cannot validate a justification it asks you, rather than deciding for you.</li>
+        <li><strong style="color:var(--fg);font-weight:400">It still questions about one edit in eight</strong> that you were right to make. Measured, not estimated — and naming the file in your prompt is what makes it precise.</li>
+        <li><strong style="color:var(--fg);font-weight:400">A shell write cannot be challenged.</strong> Ichor hooks edit tools, so a file written by <code>cat &gt;</code> or a codegen script is invisible in the moment. It is named at the end of the turn instead, so silence never means "nobody looked".</li>
+        <li><strong style="color:var(--fg);font-weight:400">Ichor can be wrong.</strong> The boundary is an expectation, not a fact. When it cannot verify a justification it asks you rather than deciding — and it never blocks a prompt.</li>
       </ul>
+      <p class="muted" style="margin-top:22px;max-width:74ch">
+        The longer list — memory ceilings, one database per repo, static-analysis blind spots — is in
+        the <a href="./docs.html" style="color:var(--acid)">docs</a>, where it belongs.
+      </p>
     </div>
   </section>
 

@@ -330,15 +330,17 @@ cd your-repo
 
       <ul>
         <li><strong>TypeScript and JavaScript only.</strong> Python is next. Nothing else is claimed.</li>
-        <li><strong>A retrieval call gives up after 1.5 seconds.</strong> Normal cost is under 200ms. It has been measured at 40 seconds after heavy database churn — a cause tested three ways and not isolated, so it is bounded rather than explained: past the budget Ichor says it has nothing and tells the agent to use its own search. <code>ichor down --wipe &amp;&amp; ichor up</code> restores full speed.</li>
+        <li><strong>Name the file you mean.</strong> A prompt of common words is matched on those words, and on a large repo that reaches wider than the job does — which means fewer challenges, not more. Naming a path scopes the boundary to that file and its graph neighbours instead: measured on a 1,378-file repo, 18 files of guesswork down to the 1 you pointed at. A bare filename has to be unique in the repo to count.</li>
         <li><strong>Shell writes cannot be challenged, only accounted for.</strong> Ichor hooks the agent's edit tools, so a file written by <code>cat &gt;</code>, a codegen script or your own editor is invisible at the moment it happens. At the end of the turn Ichor names anything that changed without ever reaching a verdict, so silence means <em>nothing was out of scope</em> rather than <em>Ichor was never asked</em>.</li>
-        <li><strong>Static analysis.</strong> Dynamic dispatch and runtime-constructed calls cannot be seen, so results are a floor and never a ceiling. An unresolvable call is counted, not guessed.</li>
-        <li><strong>The graph is rebuilt between turns, not during them.</strong> Within one turn Ichor can be a few edits behind; what your agent just wrote is tracked as a weaker, name-based hint and never quoted as evidence.</li>
-        <li><strong>One conversation at a time per repo.</strong> Two agent sessions in one checkout share a boundary; the newer takes it over.</li>
-        <li><strong>Name the file you mean, and it does two things.</strong> Above a few thousand files an ordinary sentence matches too much of the repo to locate anything, so a prompt of common words will not move the boundary. Naming a path always does — and it also scopes the boundary to that file and its graph neighbours instead of searching on words. Measured on a 1,378-file repo: 18 files of guesswork down to the 1 you pointed at. A bare filename has to be unique in the repo to count; <code>index.ts</code> says nothing.</li>
-        <li><strong>Describe a task in words and the boundary is a superset.</strong> A prompt naming no path is matched on its words, and on a large repo that reaches wider than the job does. That means fewer challenges, not more, and the one-in-eight figure is the measurement of what it costs. Naming the file fixes it outright.</li>
-        <li><strong>The boundary is an expectation, not a fact.</strong> It is designed to grow when the work justifies it.</li>
+        <li><strong>Static analysis, and it says so.</strong> Dynamic dispatch and runtime-constructed calls cannot be seen, so results are a floor and never a ceiling. A call Ichor cannot resolve is counted and reported, never guessed — on a 1,362-file repo that was 7,178 call sites it declined to invent an edge for.</li>
       </ul>
+
+      <p>
+        Smaller ones, for completeness: a retrieval call gives up after 1.5 seconds and hands the
+        question to your agent's own search; the graph is rebuilt between turns, so within a single
+        turn Ichor can be a few edits behind; and two agent sessions in one checkout share a
+        boundary, with the newer taking it over.
+      </p>
 
       <div class="note warn">
         <p>Ichor can be wrong. When it cannot validate a justification it asks you, rather than deciding for you.</p>

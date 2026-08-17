@@ -82,6 +82,32 @@ function acquireLock(repoRoot: string): boolean {
   return true;
 }
 
+/**
+ * Is a rebuild holding the database right now?
+ *
+ * Exported because the PROMPT path needs it, and that is the whole of bug 6.
+ * Finishing a turn that edited files starts a rebuild; prompt again within a few
+ * seconds and the boundary draw contends with it, overruns the 20-second ceiling,
+ * and Ichor protects nothing for that turn — which was observed three times in one
+ * session and is invisible unless you read the log.
+ *
+ * The two are not competing for a scarce resource by accident. They are the same
+ * process design: rebuild when the human is reading, draw when the human is
+ * typing. When they do overlap, one of them has to give, and it should be the one
+ * whose work is still valid a second later.
+ */
+export function refreshInProgress(repoRoot: string): boolean {
+  try {
+    const held = JSON.parse(fs.readFileSync(lockPath(repoRoot), 'utf8')) as { startedAt?: string };
+    const age = Date.now() - Date.parse(held.startedAt ?? '');
+    // A lock older than this belonged to a process that died, and waiting on a
+    // dead rebuild would be worse than ignoring it.
+    return Number.isFinite(age) && age < LOCK_STALE_MS;
+  } catch {
+    return false;
+  }
+}
+
 function releaseLock(repoRoot: string): void {
   try {
     fs.rmSync(lockPath(repoRoot));
@@ -93,23 +119,51 @@ function releaseLock(repoRoot: string): void {
 // ------------------------------------------------------------ staleness
 
 /**
- * Paths git reports as modified.
+ * Paths git reports as modified, relative to the WATCHED root.
  *
  * This is what catches edits Ichor's hook never saw: a file written by a shell
  * command, a codegen script, or the developer's own editor. Returns an empty
  * list for a non-git repo, where the overlay is the only signal we have.
+ *
+ * THE PREFIX MATTERS, and getting it wrong is silent.
+ *
+ * `git status` reports paths relative to the GIT ROOT, not to the directory it
+ * ran in. When those are the same it makes no difference, and every suite here
+ * ran that way. When they differ — `ichor init` inside `backend/` of a monorepo,
+ * an entirely ordinary thing to do — every path comes back with `backend/` on the
+ * front, and the callers below join it onto the repo root a second time. The stat
+ * then fails, the failure is read as "the file was deleted", and a rebuild is
+ * triggered after every single turn, forever.
+ *
+ * Nothing failed while that was true. It surfaced because one test compared a
+ * reported path against the one it had just written, in a repo that happens to be
+ * a subdirectory — the single arrangement no other suite used.
  */
-function gitChangedPaths(repoRoot: string): string[] {
+export function gitChangedPaths(repoRoot: string): string[] {
   try {
-    const result = spawnSync('git', ['status', '--porcelain', '--untracked-files=all'], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      timeout: 3_000,
-    });
+    const run = (args: string[]) =>
+      spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', timeout: 3_000 });
+
+    // Empty when the watched root IS the git root, which is the common case.
+    const prefixResult = run(['rev-parse', '--show-prefix']);
+    if (prefixResult.status !== 0) return [];
+    const prefix = (prefixResult.stdout ?? '').trim();
+
+    // `-- .` keeps a monorepo's other packages out of the answer entirely. They
+    // are not this task's repository and never were.
+    const result = run(['status', '--porcelain', '--untracked-files=all', '--', '.']);
     if (result.status !== 0 || !result.stdout) return [];
+
     return result.stdout
       .split(/\r?\n/)
       .map((line) => line.slice(3).trim())
+      // A rename reads `old -> new`; the new path is the one that exists now.
+      .map((p) => (p.includes(' -> ') ? p.slice(p.lastIndexOf(' -> ') + 4) : p))
+      // Quoted when the path contains unusual characters.
+      .map((p) => (p.startsWith('"') && p.endsWith('"') ? p.slice(1, -1) : p))
+      .filter((p) => p.length > 0)
+      .filter((p) => !prefix || p.startsWith(prefix))
+      .map((p) => (prefix ? p.slice(prefix.length) : p))
       .filter((p) => /\.(ts|tsx)$/.test(p) || p.endsWith('.prisma'));
   } catch {
     return [];
@@ -140,7 +194,15 @@ export function needsRefresh(repoRoot: string): StalenessReason {
   for (const rel of gitChangedPaths(repoRoot)) {
     try {
       if (fs.statSync(path.join(repoRoot, rel)).mtimeMs > builtAt) {
-        return { stale: true, why: `${rel} changed outside the agent` };
+        // "changed since the graph was built", NOT "changed outside the agent".
+        //
+        // git cannot tell you who wrote a file, and the old wording claimed it
+        // could. It was wrong in an ordinary case: a challenged edit is
+        // deliberately kept out of the overlay, so a file the agent definitely
+        // wrote reaches this branch and was then reported as someone else's work.
+        // `unseenEdits` in hook/stop.ts is the thing that can answer provenance,
+        // because it knows what Ichor actually judged.
+        return { stale: true, why: `${rel} changed since the graph was built` };
       }
     } catch {
       // Deleted since git reported it — that is a change too.
@@ -174,17 +236,28 @@ export async function analyzeAndPersist(repoRoot: string, client: GraphClient): 
   // its own whenever the cache cannot be trusted to give an identical answer —
   // no cache, a deleted file, or too much of the tree affected to be worth it.
   const previous = loadFacts(repoRoot) ?? undefined;
-  const result = analyzeIncremental(repoRoot, previous, loadCache(repoRoot));
+  const cache = loadCache(repoRoot);
+  const result = analyzeIncremental(repoRoot, previous, cache);
   const facts = result.facts;
 
-  await writeGraph(client, facts);
+  // The ledger from the last write is what turns a refresh into "write the ten
+  // edges that changed" instead of all thirteen thousand.
+  const written = await writeGraph(client, facts, {
+    previous,
+    previousEdges: cache?.edges,
+  });
 
   writeAtomic(
     factsPath(repoRoot),
     `${JSON.stringify({ version: 1, builtAt, facts } satisfies FactsEnvelope)}\n`,
   );
   writeAtomic(indexPath(repoRoot), `${JSON.stringify(buildNameIndex(facts, builtAt))}\n`);
-  writeAtomic(cachePath(repoRoot), `${JSON.stringify(result.cache)}\n`);
+  // The ledger goes in with the file hashes: both answer "what did we do last
+  // time", and both are useless if they disagree with each other.
+  writeAtomic(
+    cachePath(repoRoot),
+    `${JSON.stringify({ ...result.cache, edges: written.edges })}\n`,
+  );
   return facts;
 }
 

@@ -31,9 +31,16 @@
     "check": "tsx scripts/check.ts",
     "multi:test": "tsx scripts/multi-repo-test.ts",
     "incremental:test": "tsx scripts/incremental-test.ts",
+    "session:test": "tsx scripts/session-test.ts",
     "hook:test": "tsx scripts/hook-test.ts",
     "mcp:test": "node dist/scripts/mcp-test.js",
-    "judge:test": "node -r dotenv/config dist/scripts/judge-test.js"
+    "judge:test": "node -r dotenv/config dist/scripts/judge-test.js",
+    "delta:test": "tsx scripts/verify-delta.ts",
+    "read:test": "tsx scripts/read-test.ts",
+    "exported:gate": "node scripts/exported-gate.mjs",
+    "analyze:gate": "tsx scripts/analyze-gate.ts",
+    "boundary:gate": "tsx scripts/boundary-gate.ts",
+    "named:gate": "tsx scripts/named-seed-gate.ts"
   },
   "dependencies": {
     "commander": "^12.1.0",

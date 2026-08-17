@@ -163,6 +163,54 @@ const MAX_SHAPE_USERS = 25;
 const SUBJECT_ANCHORS = 12;
 
 /**
+ * A note on what was tried before the single fetch, so it is not tried again.
+ *
+ * The walk used to ask one question per node and the obvious fix looked like
+ * parallelism: 120 of those queries take 1,836ms serially, 107ms eight at a time,
+ * 69ms sixteen. In the real CLI it then died with "Connection acquisition timed out
+ * in 60000 ms" at width 12 and again at width 4 — this engine does not tolerate
+ * concurrent sessions under load, however well it benchmarks idle.
+ *
+ * Batching by id is also unavailable: it rejects `UNWIND $ids AS id MATCH (a {id: id})`
+ * and `WHERE id IN $ids` alike.
+ *
+ * What worked was asking FEWER questions rather than faster ones — see
+ * `loadCallGraph`.
+ */
+
+/** The row shape the walk reads. Matches a Bolt record closely enough to swap in. */
+type Row = { get(key: string): unknown };
+
+/**
+ * WHY THE WALK ASKS ONE QUESTION PER NODE, MEASURED.
+ *
+ * The obvious fix for 341 round trips is to fetch the repository's call edges in
+ * ONE query and walk them in memory. That was built, gated for correctness — both
+ * paths produce byte-identical boundaries — and then measured, and it LOSES on
+ * both axes that matter:
+ *
+ *                          per-node        one whole-repo query
+ *   one project loaded     1,601ms          4,977ms
+ *   five projects loaded   slow, finishes   TIMES OUT at 30s
+ *
+ * The reason is that this engine has no property indexes — `CREATE INDEX` is
+ * rejected in every form — so `{repo: …}` cannot be sought, only scanned, and a
+ * scan grows with the whole DATABASE rather than this repo. An id lookup does not:
+ *
+ *   callees of one id, one project loaded      4.7ms
+ *   callees of one id, five projects loaded     47ms
+ *   one File by {repo} with LIMIT 1, five     146,418ms
+ *
+ * So many cheap seeks beat one expensive scan here, and `LIMIT 1` saves nothing
+ * when there is nothing to seek on. Parallelising the seeks is also out: it
+ * benchmarked 1,836ms → 69ms at width 16 and then died with "Connection
+ * acquisition timed out in 60000 ms" in the real CLI at width 12 AND at width 4.
+ *
+ * `scripts/boundary-gate.ts` is what remains of the attempt, and it is worth
+ * keeping: any future change to this walk has to prove the boundary is unchanged.
+ */
+
+/**
  * How many distinct PLACES these rows represent.
  *
  * A place is a top-level declaration. Counting rows instead counts a component's
@@ -382,24 +430,51 @@ export async function buildNeighborhood(
   // Scoped to one repository: "how many places use this" counted across every
   // project in the database would make a helper look shared because a DIFFERENT
   // codebase happens to use one of the same name.
-  const hubRows =
-    options.hubRule === true
-      ? await client.run(
-          `MATCH (a:Function {repo: $repo})-[c:CALLS]->(b:Function)
-             RETURN b.id AS id, a.root AS caller, c.contains AS contains`,
-          { repo: anchors.length ? repoOf(anchors[0].key) : '' },
-        )
-      : { records: [] as { get(key: string): unknown }[] };
-  if (options.hubRule === true) queryCount++;
+  /**
+   * The whole repo's call edges, once.
+   *
+   * This replaces BOTH the per-node walk below and the separate hub-count query,
+   * which were two scans of the same relationships. See `loadCallGraph`.
+   */
+  const repoId = anchors.length ? repoOf(anchors[0].key) : '';
+
+  /** One node's edges, by id — the only shape this engine answers cheaply. */
+  const edgesOf = async (id: number, direction: 'out' | 'in'): Promise<Row[]> => {
+    queryCount++;
+    const rows = await client.run(
+      direction === 'out'
+        ? `MATCH (a:Function {id: $id})-[c:CALLS]->(b:Function)
+             RETURN b.id AS id, b.name AS name, b.file AS file, c.render AS render, c.contains AS contains`
+        : `MATCH (b:Function)-[c:CALLS]->(a:Function {id: $id})
+             RETURN b.id AS id, b.name AS name, b.file AS file, c.render AS render`,
+      { id: gInt(id) },
+    );
+    return rows.records;
+  };
+
+  /**
+   * Caller counts for the hub rule, in one query for the whole repo.
+   *
+   * The one place a whole-repo scan is still the right shape: the walk visits
+   * hundreds of nodes and would otherwise ask the same question about `cn` from
+   * every one of them. Only asked when the rule is on, which it is not by default.
+   */
   const callerPlaces = new Map<number, Set<string>>();
-  for (const record of hubRows.records) {
-    // A parent "calling" the function it declares is not a user of it.
-    if (record.get('contains') === true) continue;
-    const id = Number(record.get('id'));
-    const place = String(record.get('caller'));
-    const places = callerPlaces.get(id) ?? new Set<string>();
-    places.add(place);
-    callerPlaces.set(id, places);
+  if (options.hubRule === true) {
+    const hubRows = await client.run(
+      `MATCH (a:Function {repo: $repo})-[c:CALLS]->(b:Function)
+         RETURN b.id AS id, a.root AS caller, c.contains AS contains`,
+      { repo: repoId },
+    );
+    queryCount++;
+    for (const record of hubRows.records) {
+      // A parent "calling" the function it declares is not a user of it.
+      if (record.get('contains') === true) continue;
+      const id = Number(record.get('id'));
+      const places = callerPlaces.get(id) ?? new Set<string>();
+      places.add(String(record.get('caller')));
+      callerPlaces.set(id, places);
+    }
   }
   /**
    * The hub rule is OFF by default, and this reverses an earlier decision of mine.
@@ -450,10 +525,21 @@ export async function buildNeighborhood(
     // Containment cannot cycle, so this always terminates.
     const current = [...frontier];
 
-    for (let index = 0; index < current.length; index++) {
-      const id = current[index];
+    /**
+     * No fetching. The whole call graph is already in memory, so a level of the
+     * walk is a map lookup per node rather than a round trip per node.
+     */
+    const fetched = [];
+    for (const id of current) {
+      fetched.push({
+        id,
+        callees: { records: await edgesOf(id, 'out') },
+        callers: depth <= maxInboundDepth ? { records: await edgesOf(id, 'in') } : undefined,
+      });
+    }
+
+    for (const { id, callees, callers: callerRows } of fetched) {
       const fromName = members.get(id)?.name ?? '?';
-      const param = gInt(id);
 
       /** Drop the shared pieces, and record what was dropped (rule 2). */
       const withoutHubs = (records: { get(key: string): unknown }[]) =>
@@ -497,13 +583,6 @@ export async function buildNeighborhood(
         for (const id of added) if (rendered.has(id) && !called.has(id)) renderArrivals.add(id);
       };
 
-      const callees = await client.run(
-        `MATCH (a:Function {id: $id})-[c:CALLS]->(b:Function)
-           RETURN b.id AS id, b.name AS name, b.file AS file, c.render AS render, c.contains AS contains`,
-        { id: param },
-      );
-      queryCount++;
-
       // A function declared inside this one IS this one, for scope purposes, so
       // it joins at the same distance rather than a hop further out. Charging it
       // a hop would push a component's own handlers toward the edge of its own
@@ -518,17 +597,11 @@ export async function buildNeighborhood(
       next.push(...addedOut);
 
       // Consumers, only close to the anchors. See maxInboundDepth.
-      if (depth <= maxInboundDepth) {
-        const callers = await client.run(
-          `MATCH (b:Function)-[c:CALLS]->(a:Function {id: $id})
-             RETURN b.id AS id, b.name AS name, b.file AS file, c.render AS render`,
-          { id: param },
-        );
-        queryCount++;
+      if (callerRows) {
         // Inbound is not filtered by the render rule: the page that renders the
         // component you are changing is genuinely above it, and inbound is
         // already held to one hop.
-        const addedIn = absorb(withoutHubs(callers.records), depth, () => `calls ${fromName}`);
+        const addedIn = absorb(withoutHubs(callerRows.records), depth, () => `calls ${fromName}`);
         next.push(...addedIn);
       }
 
@@ -560,14 +633,19 @@ export async function buildNeighborhood(
   // ---- models the neighbourhood reaches ----------------------------------
   const coreModels = new Set<string>();
 
+  // One query per member, fetched in slices for the same reason as the walk
+  // above: a 393-member boundary is 393 more round trips, and they are all
+  // independent. Folded in member order so `viaFunction` stays deterministic.
   for (const member of members.values()) {
-    const touched = await client.run(
-      `MATCH (f:Function {id: $id})-[:TOUCHES]->(m:Model)
-         RETURN m.id AS id, m.name AS name`,
-      { id: gInt(member.id) },
-    );
     queryCount++;
-    for (const record of touched.records) {
+    const touched = (
+      await client.run(
+        `MATCH (f:Function {id: $id})-[:TOUCHES]->(m:Model) RETURN m.id AS id, m.name AS name`,
+        { id: gInt(member.id) },
+      )
+    ).records;
+
+    for (const record of touched) {
       const modelId = Number(record.get('id'));
       const name = String(record.get('name'));
       if (!models.has(modelId)) models.set(modelId, { name, viaFunction: member.name });

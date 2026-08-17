@@ -103,30 +103,33 @@ A tool that questions correct work gets uninstalled the same afternoon, so that 
 
 So Ichor was measured against **30 real commits** from [papermark](https://github.com/mfts/papermark), a real document-sharing product. Every commit is a labelled example: its message is the task, and the files it changed are what a developer genuinely had to touch. Each one was replayed through the real classifier.
 
-| | at the start | now |
-|---|---|---|
-| **real edits wrongly challenged** | **62.7%** | **19.3%** |
-| real changed code inside the boundary | 52.5% | 69.7% |
-| median task area | 8.0% of the repo | 8.9% |
-| worst-case task area | 23.3% | 12.1% |
+| | |
+|---|---|
+| **real edits wrongly challenged** | **12.8%** |
+| real changed code inside the boundary | 68.4% |
+| median task area | 8.9% of the repo |
+| worst-case task area | 12.1% |
 
-That first measurement is why this section exists. Ten-out-of-ten on an eleven-file demo was hiding a tool that interrupted **nearly two thirds** of genuine work on a real codebase. Four defects came out of it — an anchor cap that bound on every single task, damping that suppressed the very words identifying a domain's subject, existing files judged more harshly than new ones, and a rule excluding shared code that tasks are often *about*.
+By file type, at 12.8%: `.ts` 10 of 45 · `.tsx` **1 of 26** · `.prisma` **0 of 2** · everything else **0**.
 
-**Being honest about it:** a real commit is not always one clean task — developers bundle incidental changes — so some of that 19.3% may be Ichor correctly questioning a tangential edit. Nothing separates those, and no credit is claimed for it. One repository, 30 commits, TypeScript.
+Scope of the measurement: one repository, 30 commits, 86 changed files of every type, TypeScript.
 
 Reproduce it with `npx tsx scripts/ground-truth.ts collect <repo>` then `alarms <repo>`.
 
 ### Speed
 
-| | papermark (1,362 files) | cal.com (4,975 files) |
+| | papermark (1,362 files) | Infisical (7,735 files) |
 |---|---|---|
-| first index | 26s | **35s** |
-| refresh after editing one file | **7s** | **5s** |
-| refresh with nothing changed | **6s** | — |
+| first index, empty database | 25s | 2m 21s |
+| second index, nothing changed | **6s** | **16s** |
+| reading the code alone | 15s | 82s |
+| peak memory | 346 MB | 788 MB |
+
+Both at Node's default heap — there is no `--max-old-space-size` anywhere in the code, the docs or the scripts. `npm run read:test -- <repo>` runs one process per repository and reports peak memory, so "can Ichor read this codebase" is a question you can answer about your own before installing anything.
 
 Refreshes re-read only what changed, and `npm run incremental:test` asserts that an incremental read is **identical** to a full one — every function, call, reference and table touch — because a stale graph never announces itself.
 
-Papermark yields 3,471 functions and 18,983 connections between them.
+Papermark yields 3,471 functions and **21,384** connections between them. `npm run delta:test -- <repo>` checks the graph against the code after a write, per relationship type, and checks the local record of what was written against both — because a fast write and a correct one are different things, and a graph that is subtly wrong still answers confidently.
 
 ## Quick start
 
@@ -156,13 +159,75 @@ That matters more than it looks. Nobody runs a CLI command between tasks, so a b
 ```bash
 ichor status      # what is in scope, what was challenged, what was forced through
 ichor start "…"   # name the task by hand; detection then reports but never redraws
+ichor key         # store your own OpenRouter key — optional, see below
 ichor stop        # stop watching
-ichor down        # stop the database   (--wipe also deletes the graph)
+ichor down        # stop the database, from any directory
+                  # --wipe also deletes the graph — every project in it, not just this one
 ```
+
+### Verdicts you will see
+
+`ichor status` and `.ichor/hook.log` use five words, and only two of them interrupt you.
+
+| Verdict | Meaning |
+|---|---|
+| `EXPECTED` | This is the job. Silent. |
+| `CONNECTED` | Not the job, but genuinely joined to it — one call away, or working on the same table. Silent. |
+| `NOT_JUDGED` | Not a file Ichor reads, so it has no opinion. Silent, and honest about why. |
+| `SUSPICIOUS` | Outside the job, with evidence. You get asked. |
+| `HUMAN_REVIEW` | Ichor cannot tell. It asks you rather than deciding. |
+
+A challenge is not a block. Explain why the change is needed and carry on — Ichor asks **once per file**. A file that was questioned and written anyway is remembered as exactly that, and is never later quoted back as proof that something else belongs.
+
+### The optional API key
+
+**Ichor works fully without one.** Every boundary, every challenge, every piece of evidence and all nine tools your agent can call need no key and make no outbound request.
+
+A key adds exactly one thing: when your agent *argues* that an expansion is genuinely necessary, that argument can be weighed against the evidence the graph produced. Without a key, an argument Ichor cannot verify comes to **you** instead of being granted.
+
+```bash
+ichor key sk-or-…        # get one at https://openrouter.ai/keys
+ichor key                # is one set, and where did it come from?
+ichor key --remove       # delete it
+```
+
+The key is checked with OpenRouter before it is stored, so a truncated paste is caught immediately rather than becoming a feature that quietly does nothing. It is written to **`~/.ichor/credentials.json`** in your home directory, readable only by you and deliberately *outside* every repository so it cannot be committed by accident. An exported `ICHOR_OPENROUTER_KEY` always wins over the stored one, which is what you want in CI.
+
+Cost is bounded by design: the Judge is never consulted on an ordinary edit, only when an argument has actually been made, and it is capped per task **and** per file.
+
+### Environment
 
 **Requirements:** Node 20+, Docker, and a TypeScript repo — ideally Next.js with Prisma.
 
-Several projects can share one database, so you can watch as many repos as you like at once. `ichor init` writes `docker-compose.ichor.yml` into your repo and adds `.ichor/` to `.gitignore`. It *merges* into an existing `.claude/settings.json`, `.codex/hooks.json` and `.mcp.json` rather than overwriting them.
+**One database per repository.** Projects never bleed into each other — that is tested with four loaded at once — but HydraDB has no property indexes, so scoping a query to one repo is a scan that grows with the whole database. Three share one comfortably; more will not, which is why `ichor init` writes `docker-compose.ichor.yml` into each repo.
+
+`ichor init` also adds `.ichor/` to your `.gitignore`, *merges* into an existing `.claude/settings.json`, `.codex/hooks.json` and `.mcp.json` rather than overwriting them, and allows its own MCP tools so the first session is not a queue of permission prompts.
+
+None of these variables are required. Ichor picks sensible values and `ichor init` writes the rest.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ICHOR_OPENROUTER_KEY` | — | Your OpenRouter key. `OPENROUTER_API_KEY` and `OPENROUTER_KEY` are also read. Beats the stored key. |
+| `ICHOR_JUDGE_MODEL` | `openai/gpt-5-mini` | Which model weighs an argument. A cheap fallback is always tried second. |
+| `ICHOR_JUDGE_MAX_PER_TASK` | bounded | How many times one task may consult the Judge. |
+| `ICHOR_JUDGE_MAX_PER_FILE` | bounded | How many times one file may. |
+| `ICHOR_JUDGE_TIMEOUT_MS` | `20000` | Give up on the model and fall back to the graph-only verdict. |
+| `ICHOR_HYDRA_URL` | `bolt://127.0.0.1:7687` | Where HydraDB is listening. |
+| `ICHOR_HYDRA_TOKEN` | generated | Auth token for the local database. Written by `ichor up`. |
+| `ICHOR_HYDRA_NAMESPACE` | default | Namespace inside HydraDB. |
+| `ICHOR_DEBUG` | — | `1` mirrors the hook log to stderr while you work. |
+
+### When something is wrong
+
+**Ichor said nothing at all.** It fails open on purpose — no task, no database, a parse error, a timeout: every one of those allows the edit, because a tool that blocks work when it breaks gets uninstalled within the hour. So it always writes down why. `.ichor/hook.log` has one line per decision, and it distinguishes "decided to stay quiet" from "never ran".
+
+**"HydraDB is not answering on the Bolt port."** Run `ichor up` and give Docker a moment.
+
+**Codex runs no hooks.** See the caveat under [Supported agents](#supported-agents).
+
+**It questioned something it should not have.** About one edit in eight, measured. Tell your agent why and carry on. If a boundary is plainly wrong, `ichor start "…"` names the task yourself and detection stops redrawing it.
+
+Full documentation, laid out as a page: [`web/docs.html`](web/docs.html).
 
 ## Verify it yourself
 
@@ -175,13 +240,22 @@ npm run up                  # HydraDB + MinIO via Docker
 npm run smoke               # round-trips a real write; a listening port is not proof
 npm run build
 
-npm test                    # 109 unit tests
+npm test                    # 176 unit tests
 npm run check               # 10 classification scenarios, incl. a mid-session job switch
 npm run hook:test           # 6 hook cases, spawning the real CLI as an agent would
-npm run mcp:test            # 13 MCP protocol checks
+npm run mcp:test            # 18 MCP protocol checks
 npm run multi:test          # 10 checks that two projects never bleed into each other
 npm run incremental:test    # 5 checks that a partial re-read equals a full one
+npm run session:test        # 12 cases a real session hits and nothing else tested
+npm run read:test -- <repo>   # can it read a real codebase at the default heap?
+npm run delta:test -- <repo>  # does the graph match the code after a write?
+npm run named:gate -- <repo>   # does naming a file narrow scope, and nothing else?
+npm run judge:test            # a live Judge, three cases, a few cents
 ```
+
+`npm run session:test` is the one that matters most, and it exists because the six suites above it **all passed while eleven real bugs were live**. Every one of them ran against an eleven-file demo. This one drives the real compiled hook over real payloads — a file type Ichor cannot read, a path in no repository, a question instead of an instruction, a rebuild holding the database — and it runs against any repo you point it at, not just the demo.
+
+`npm run named:gate` is the one that shows what a gate is FOR. It asserts two things at once: that naming a file in a prompt narrows the boundary, and that a prompt naming nothing produces a byte-identical answer — including for all 30 commits the published false-alarm rate is measured on. The first half is the feature. The second half is the proof that shipping the feature did not silently invalidate the number.
 
 `npm run check` is the one to read. It runs the vendor task, then **switches job mid-session** to billing: the billing file that was SUSPICIOUS under the first task must now be EXPECTED, and the vendor code that was in scope must not be. That flip is the whole point of a boundary that follows the conversation.
 
@@ -197,29 +271,46 @@ npm run incremental:test    # 5 checks that a partial re-read equals a full one
 
 > **Codex caveat:** Codex asks you to trust a hook file the first time it sees one, and `codex exec` cannot show that prompt — so in non-interactive mode it runs **no hooks at all**, silently. Use interactive `codex` and approve the prompt once. That is Codex's behaviour, not Ichor's, but it is worth knowing before concluding the integration is broken.
 
-Both agents also get an MCP server, so an agent can ask why something was flagged and argue its case rather than simply being refused:
+> **Claude Code caveat:** `ichor init` adds `mcp__ichor` to `permissions.allow` so the first session is not a queue of prompts, but Claude Code ignores that entry until the workspace is trusted — and untrusted is the default for a fresh clone. Open `claude` interactively in the repo once and accept the trust dialog. The hooks and every verdict work either way; only the pre-approval waits on trust.
 
-| Tool | What it does |
+### The agent can use the graph, not just be judged by it
+
+Half of Ichor's tools are not about policing at all. They exist because your agent is about to go and grep for something the graph already knows.
+
+In a real Codex run, before writing a line, it searched the repo for five words, got **116 hits**, and read **six entire files** to work out where the task lived. Ichor had that answer in **14ms**.
+
+| Tool | What it answers |
 |---|---|
+| **`ichor_find`** | **where does X live? Describe it in plain words — no need to guess a name** |
+| **`ichor_impact`** | **what breaks if I change this? Callers, endpoints, tables at stake** |
+| `ichor_callers` | who reaches this function, and from which endpoints |
+| `ichor_paths` | how the app reaches a table, and through what |
 | `ichor_task_status` | is there an active task, and what is in it |
 | `ichor_get_scope` | the neighbourhood, with distances |
 | `ichor_check_change` | classify a file before writing it |
 | `ichor_explain` | why this verdict, with the paths behind it |
 | `ichor_request_scope_expansion` | argue for the boundary to grow |
-| `ichor_callers` | who reaches this function, and from which endpoints |
-| `ichor_paths` | how the app reaches a table, and through what |
 
-The last two are not about policing. In a real Codex run, before writing a line it searched the repo for five words, got 116 hits, and read six whole files to work out where the task lived. Ichor had already answered that in 14ms and could simply have been asked.
+These search *structure*, not text — so they find code whose name you could not have guessed, and skip matches in comments and strings.
+
+The scope briefing names these on every prompt, because a tool description alone does not reach an agent — Claude Code defers MCP schemas when several servers are connected, so an unnamed tool is one the agent never sees. With the reminder in place, *"what breaks if I delete the useAuth hook?"* on a real project was answered by **one `ichor_impact` call and nothing else** — no grep, no file reads. *"Where is X?"* still goes to grep, which is fine: grep answers that well. Relationships are what it cannot answer at all.
+
+A live Claude Code session, told to use only these tools, answered *"where is duplicate email handling, and what breaks if I change `createVendor`?"* in nine calls — and found that this repo's own `DuplicateVendorEmailError` and `isDuplicateEmailError` are **never called by anything**. A grep for "duplicate" would have found those files and told you nothing about whether they were wired in.
 
 ## What it cannot do
 
 - **TypeScript and JavaScript only.** Python is next. Nothing else is claimed.
-- **It still challenges about one edit in five** that a developer would have made anyway. Measured, not estimated — see above.
+- **It still challenges about one edit in eight** that a developer would have made anyway. Measured, not estimated — see above. Every remaining case is a file the boundary did not reach, rather than a file type it refuses to read.
+- **A first index of a large repository takes tens of seconds** — 25s for 1,362 files. Once; refreshes are seconds.
+- **A retrieval call gives up after 1.5 seconds.** Normal cost is under 200ms, but it has been measured at 40 seconds after heavy churn — a cause I tested three ways and could not isolate, so it is bounded rather than explained. Past the budget Ichor says it has nothing and tells the agent to use Grep instead. `ichor down --wipe && ichor up` restores full speed if you ever see it slow down.
+- **One database per repository.** Isolation is correct and tested with four projects loaded at once, but HydraDB cannot index the property that separates them, so each extra project makes every query slower. Three share one comfortably.
 - **Static analysis.** Dynamic dispatch and runtime-constructed calls are invisible, so results are a floor, never a ceiling. `obj.method()` on a value whose type only the compiler knows is counted, not guessed.
-- **Shell writes are unseen.** Ichor hooks the agent's edit tools; a file written by `cat >` or a codegen script bypasses it entirely.
+- **Shell writes cannot be challenged, only accounted for.** Ichor hooks the agent's edit tools, so a file written by `cat >`, a codegen script, a formatter or your own editor is invisible at the moment it happens. It is not invisible afterwards: at the end of the turn Ichor names anything that changed without ever reaching a verdict, so "Ichor said nothing" means *nothing was out of scope* rather than *Ichor was never asked*.
 - **The boundary is an expectation, not a fact.** It is designed to grow when the work justifies it.
+- **Describe a task in words and the boundary is a superset.** A prompt that names no path is matched on its words, and on a large repo that reaches wider than the job does — asked to change one line, it may claim a hundred files. That means fewer challenges, not more, and the one-in-eight figure above is the measurement of what it costs. Naming the file fixes it outright: see the next point.
 - **The graph is rebuilt between turns, not during them.** Code the agent writes mid-turn is tracked as a weaker, name-based hint — enough to see that a new file connects to something it just created, never enough to be quoted as evidence.
 - **Task detection can be wrong.** It moves the boundary only when a prompt points somewhere the boundary does not cover; anything ambiguous changes nothing. `ichor status` shows what it decided and `ichor start` overrides it.
+- **Name the file you mean, and it does two things.** A prompt that *names* a path moves the boundary however incidental the rest of the sentence, and it also **scopes the boundary to that file** and its graph neighbours instead of searching on words — measured on a 1,378-file repo, 18 files of guesswork down to the 1 you pointed at. So "fix the retry in `backend/src/services/x/y.ts`" is both noticed and precise, where "fix the retry" is neither. A bare filename has to be unique in the repo to count; `index.ts` tells Ichor nothing.
 - **One conversation at a time per repo.** Two agent sessions in one checkout share a boundary; the newer takes it over.
 - **Ichor can be wrong.** When it cannot validate a justification it asks you, rather than deciding for you.
 

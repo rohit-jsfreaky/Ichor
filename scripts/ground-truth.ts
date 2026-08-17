@@ -97,9 +97,22 @@ function selectCommits(repo: string): { sha: string; subject: string; files: str
 
     let files: string[];
     try {
+      /**
+       * EVERY file the commit touched, not just TypeScript.
+       *
+       * This used to keep only `.ts`/`.tsx`, which is why the published 19.3%
+       * false-alarm figure looked respectable: it never tested a JSON, CSS,
+       * Markdown or Prisma edit. Ichor analyses only TypeScript, so every one of
+       * those is absent from the graph and therefore challenged — a whole class
+       * of false alarm the measurement was blind to by construction.
+       *
+       * A developer changing `locales/en/viewer.json` while fixing a message is
+       * doing the task. If Ichor interrupts that, the number has to say so.
+       */
       files = git(repo, ['diff', '--name-only', `${sha}^`, sha])
         .split('\n')
-        .filter((f) => /\.tsx?$/.test(f) && !/\.d\.ts$/.test(f) && !/\.(test|spec)\.tsx?$/.test(f));
+        .map((f) => f.trim())
+        .filter((f) => f.length > 0 && !/\.d\.ts$/.test(f));
     } catch {
       continue; // no parent (root commit)
     }
@@ -168,6 +181,10 @@ function collect(repo: string): void {
       let outside = 0;
 
       for (const file of commit.files) {
+        // Only TypeScript has functions to attribute a changed line to. Other
+        // file types still count as files the commit touched — that is what the
+        // false-alarm measurement judges — they simply contribute no function.
+        if (!/\.tsx?$/.test(file)) continue;
         const candidates = byFile.get(file) ?? [];
         for (const line of changedLines(repo, commit.sha, file)) {
           // The INNERMOST function containing the line owns it: a handler inside
@@ -394,14 +411,33 @@ async function alarms(repo: string): Promise<void> {
   const facts = loadFacts(repo);
   if (!facts) throw new Error(`no graph facts for ${repo}`);
 
-  const { classify } = await import('../src/scope/classify.js');
+  const { classify, isChallenge } = await import('../src/scope/classify.js');
   const client = new GraphClient(configFromEnv());
+
+  /**
+   * Put the facts in the graph before asking the graph anything.
+   *
+   * This used to assume a populated database and never check. Run after a wipe it
+   * measured every verdict against an EMPTY graph, where every file is "not in the
+   * graph" — and reported **84.9% false alarms, 73 of them `file not in graph`**,
+   * in exactly the confident shape a real result takes. Writing here costs a few
+   * seconds and makes that failure impossible.
+   */
+  const { writeGraph } = await import('../src/graph/write.js');
+  const written = await writeGraph(client, facts);
+  console.log(
+    `\n  graph: ${written.nodesWritten} nodes, ${written.edgesWritten} edges ` +
+      `(${(written.durationMs / 1000).toFixed(1)}s)`,
+  );
 
   for (const candidate of CANDIDATES) {
     let challenged = 0;
     let judged = 0;
     const byDecision = new Map<string, number>();
     const causes = new Map<string, number>();
+    // Which FILE TYPES the false alarms land on. Ichor reads only TypeScript, so
+    // this is what shows whether the number is dominated by files it cannot see.
+    const byExt = new Map<string, { judged: number; challenged: number }>();
     const examples: string[] = [];
 
     for (const testCase of cases) {
@@ -418,7 +454,15 @@ async function alarms(repo: string): Promise<void> {
         const verdict = await classify({ operation: 'edit', file }, { client, neighborhood, repo: repoIdFor(repo) });
         byDecision.set(verdict.decision, (byDecision.get(verdict.decision) ?? 0) + 1);
         judged++;
-        if (verdict.needsJudge) {
+
+        const dot = file.lastIndexOf('.');
+        const ext = dot === -1 ? '(none)' : file.slice(dot);
+        const seen = byExt.get(ext) ?? { judged: 0, challenged: 0 };
+        seen.judged++;
+        const challenge = isChallenge(verdict);
+        if (challenge) seen.challenged++;
+        byExt.set(ext, seen);
+        if (challenge) {
           challenged++;
           // Which BRANCH of the classifier spoke. Without this the total says
           // something is wrong but never which rule is wrong.
@@ -445,6 +489,15 @@ async function alarms(repo: string): Promise<void> {
     );
     for (const [cause, n] of [...causes.entries()].sort((a, b) => b[1] - a[1])) {
       console.log(`      ${String(n).padStart(3)}  ${cause}`);
+    }
+    const worst = [...byExt.entries()]
+      .filter(([, v]) => v.challenged > 0)
+      .sort((a, b) => b[1].challenged - a[1].challenged);
+    if (worst.length) {
+      console.log(`      by file type:`);
+      for (const [ext, v] of worst) {
+        console.log(`        ${ext.padEnd(8)} ${v.challenged}/${v.judged} challenged`);
+      }
     }
     for (const example of examples) console.log(`      would have asked about: ${example}`);
   }

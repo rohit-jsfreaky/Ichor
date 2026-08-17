@@ -13,6 +13,7 @@
  */
 
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { COMPOSE_FILE } from '../stack/compose.js';
@@ -159,11 +160,90 @@ function installClaudeCode(repoRoot: string, messages: string[]): boolean {
   const current = (settings.hooks ?? {}) as Record<string, unknown>;
 
   const { hooks, added } = registerEvents(current, messages, 'Claude Code');
-  if (added.length === 0) return true;
+  const allowed = allowMcpTools(repoRoot, settings, messages);
+  if (added.length === 0 && !allowed) return true;
 
-  writeJson(file, { ...settings, hooks });
-  messages.push(`  Claude Code: ${added.join(', ')} -> ${display(repoRoot, file)}`);
+  writeJson(file, { ...settings, hooks, permissions: settings.permissions });
+  if (added.length > 0) {
+    messages.push(`  Claude Code: ${added.join(', ')} -> ${display(repoRoot, file)}`);
+  }
   return true;
+}
+
+/**
+ * Let the agent call Ichor's own tools without being asked each time.
+ *
+ * Registering the MCP server is not the same as permitting its tools. Without this
+ * the first session raises a permission prompt PER TOOL — tolerable when a human is
+ * watching, and invisible until you run headless, where the prompt cannot be
+ * answered and the tools simply never work.
+ *
+ * Merged into whatever is already there, never overwritten, exactly as the hooks
+ * are: a developer's existing `permissions.allow` is theirs.
+ */
+function allowMcpTools(
+  repoRoot: string,
+  settings: Record<string, unknown>,
+  messages: string[],
+): boolean {
+  const permissions = (settings.permissions ?? {}) as Record<string, unknown>;
+  const allow = Array.isArray(permissions.allow) ? [...(permissions.allow as unknown[])] : [];
+
+  // The prefix covers every current and future Ichor tool. Listing them one by one
+  // would silently stop covering the next one added.
+  const rule = 'mcp__ichor';
+  if (allow.some((entry) => typeof entry === 'string' && entry.startsWith(rule))) {
+    messages.push('  MCP tools: already allowed');
+    return false;
+  }
+
+  allow.push(rule);
+  settings.permissions = { ...permissions, allow };
+  messages.push(`  MCP tools: allowed without prompting (permissions.allow += "${rule}")`);
+
+  /**
+   * Say so when the entry will be ignored.
+   *
+   * Claude Code discards `permissions.allow` from a project's settings until the
+   * workspace is trusted, and untrusted is the DEFAULT for a fresh clone — so the
+   * line above was, on its own, a promise the tool could not keep. It reports the
+   * fact rather than silently doing nothing, and never edits the user's global
+   * config to force it: a tool that grants itself trust in a file the user owns has
+   * answered the wrong question.
+   */
+  if (!workspaceTrusted(repoRoot)) {
+    messages.push('    ⚠ Claude Code ignores this until the workspace is trusted, which is the');
+    messages.push('      default for a fresh clone. Run `claude` here once and accept the dialog.');
+    messages.push('      Hooks and verdicts work either way — only this pre-approval waits.');
+  }
+  return true;
+}
+
+/**
+ * Has this workspace been trusted in Claude Code?
+ *
+ * Read-only, and deliberately so. The answer lives in the user's own
+ * `~/.claude.json`, and Ichor's business is reporting what it found there, not
+ * changing it. Returns true when it cannot tell, so an unreadable config produces a
+ * silence rather than a warning about a problem that may not exist.
+ */
+function workspaceTrusted(repoRoot: string): boolean {
+  try {
+    const config = JSON.parse(
+      fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf8'),
+    ) as { projects?: Record<string, { hasTrustDialogAccepted?: boolean }> };
+
+    const wanted = path.resolve(repoRoot).replace(/\\/g, '/').toLowerCase();
+    for (const [key, value] of Object.entries(config.projects ?? {})) {
+      if (key.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase() === wanted) {
+        return value.hasTrustDialogAccepted === true;
+      }
+    }
+    // Never opened here. Claude Code will ask on first run, so the warning applies.
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 function installCodex(repoRoot: string, messages: string[]): boolean {

@@ -23,12 +23,13 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { analyzeRepo } from '../src/extract/analyze.js';
 import { writeGraph } from '../src/graph/write.js';
-import { GraphClient, configFromEnv } from '../src/graph/client.js';
+import { GraphClient, configFromEnv, gInt } from '../src/graph/client.js';
 import { findAnchors } from '../src/scope/anchors.js';
 import { buildNeighborhood } from '../src/scope/neighborhood.js';
 import { classify } from '../src/scope/classify.js';
 import { callersOf } from '../src/graph/queries.js';
-import { repoIdFor } from '../src/ids.js';
+import { IdRegistry, hashId, repoIdFor } from '../src/ids.js';
+import type { GraphFacts } from '../src/extract/types.js';
 
 /**
  * The fixtures are written to a temp directory rather than kept in the repo.
@@ -89,9 +90,13 @@ function check(label: string, ok: boolean, detail = ''): void {
 
 const client = new GraphClient(configFromEnv());
 
+/** Declared out here so the teardown can take the twins back out of the graph. */
+let factsA: GraphFacts | undefined;
+let factsB: GraphFacts | undefined;
+
 try {
-  const factsA = analyzeRepo(repoA);
-  const factsB = analyzeRepo(repoB);
+  factsA = analyzeRepo(repoA);
+  factsB = analyzeRepo(repoB);
 
   // Both projects really do collide on the things that used to merge.
   const sharedFile = 'src/lib/db.ts';
@@ -172,7 +177,55 @@ try {
     verdict.decision,
   );
 } finally {
+  /**
+   * Take the twins back out of the graph.
+   *
+   * This suite writes two throwaway projects into the developer's real database and
+   * used to leave them there. Every run added two more. After five runs there were TEN
+   * abandoned projects in the graph — discovered while investigating why a retrieval
+   * call was slow, sitting alongside the repositories someone actually works in.
+   *
+   * A test suite that quietly degrades the environment it runs in is worse than a slow
+   * one, because the cost is invisible and it accumulates. Deleted by NODE ID rather
+   * than by `{repo: …}`: a repo-scoped match is a scan on this engine, and the point is
+   * to leave nothing behind cheaply.
+   */
+  try {
+    let removed = 0;
+    for (const [root, facts] of [[repoA, factsA], [repoB, factsB]] as const) {
+      if (!facts) continue;
+      const ids = new IdRegistry();
+      const keys = [
+        ...facts.files.map((f) => f.key),
+        ...facts.functions.map((f) => f.key),
+        ...facts.types.map((t) => t.key),
+        ...facts.routes.map((r) => r.key),
+        ...facts.models.map((m) => m.key),
+        ...facts.fields.map((f) => f.key),
+      ];
+      for (const key of keys) {
+        await client.run('MATCH (n {id: $id}) DETACH DELETE n', { id: gInt(ids.idFor(key)) });
+        removed++;
+      }
+      await client.run('MATCH (n:IchorGraph {id: $id}) DETACH DELETE n', {
+        id: gInt(hashId(`ichor:graph:${repoIdFor(root)}`)),
+      });
+    }
+    console.log(`\n  cleaned up — ${removed} twin nodes removed from the graph`);
+  } catch (error) {
+    // Said out loud rather than left silently dirty; invisibility was the whole bug.
+    console.log(`\n  ⚠ could not remove the twins: ${(error as Error).message.split('\n')[0]}`);
+    console.log('    They will slow every later query. Wipe with: ichor down --wipe && ichor up');
+  }
+
   await client.close();
+
+  // The temp directories were never removed either. Both twins share one parent.
+  try {
+    fs.rmSync(path.dirname(repoA), { recursive: true, force: true });
+  } catch {
+    /* a leftover temp directory is untidy, not harmful */
+  }
 }
 
 console.log(`\n${passed}/${total} multi-project checks passed\n`);

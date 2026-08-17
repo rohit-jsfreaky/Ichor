@@ -71,6 +71,32 @@ export interface PersistedTask {
   coreModels: string[];
   /** Files the agent was challenged on, so we do not ask twice. */
   challenged: string[];
+  /**
+   * Every file Ichor formed a verdict on this task — including the ones it
+   * allowed, which are otherwise invisible because silence leaves no trace.
+   *
+   * This exists to answer one question at the end of a turn: did anything change
+   * that Ichor never saw? One live session modified a file with no hook event at
+   * all, and the only reason it was noticed was a human running `git status`.
+   * Without a record of what WAS judged there is nothing to compare against, so
+   * a missed edit and a deliberately-allowed edit look identical in the log.
+   */
+  judged: string[];
+  /**
+   * Files already named at the end of a turn as "changed but never judged".
+   *
+   * Reporting is the whole value of that line, and reporting TWICE destroys it. A
+   * file written outside an edit tool can never acquire a verdict — no hook will
+   * ever fire for it — so without this the same line repeats at the end of every
+   * turn for the rest of the task, including turns that changed nothing at all.
+   * That is finding 16 again: a warning that fires unconditionally is noise in the
+   * one place that has to carry signal.
+   *
+   * The mtime is stored with the path so this suppresses a repeat, not a genuinely
+   * new change. Write to the same file again by hand and it is named again,
+   * because that is new information.
+   */
+  reportedUnseen: { file: string; mtimeMs: number }[];
   /** Files the developer or Judge approved — the boundary after it grew. */
   justified: { file: string; reason: string; at: string }[];
   /**
@@ -151,6 +177,8 @@ export function saveTask(
     ...boundaryFields(repoRoot, neighborhood),
     startedAt: new Date().toISOString(),
     challenged: [],
+    judged: [],
+    reportedUnseen: [],
     justified: [],
     // Forced writes survive a new task deliberately. The code is still in the
     // repo and still was never justified; forgetting that is how a bypassed
@@ -198,7 +226,17 @@ export function loadTask(repoRoot: string): PersistedTask | undefined {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<PersistedTask> & {
       version?: number;
     };
-    if (parsed.version === 2) return parsed as PersistedTask;
+    // `judged` was added after version 2 shipped, so a state file written by the
+    // previous build is a valid v2 without it. Defaulting here rather than
+    // bumping the version keeps every other field intact: the alternative is a
+    // migration that throws away a boundary the developer is still working in.
+    if (parsed.version === 2) {
+      return {
+        ...(parsed as PersistedTask),
+        judged: parsed.judged ?? [],
+        reportedUnseen: parsed.reportedUnseen ?? [],
+      };
+    }
     // A task written by an older Ichor is still a real task the developer is in
     // the middle of. Fill the new fields rather than dropping their boundary.
     if (parsed.version === 1) {
@@ -206,6 +244,8 @@ export function loadTask(repoRoot: string): PersistedTask | undefined {
         ...(parsed as unknown as PersistedTask),
         version: 2,
         forced: [],
+        judged: [],
+        reportedUnseen: [],
         mode: 'explicit',
         overlay: [],
         graphRevision: 0,
@@ -245,6 +285,39 @@ export function markChallenged(repoRoot: string, file: string): void {
   updateTask(repoRoot, (task) =>
     task.challenged.includes(file) ? task : { ...task, challenged: [...task.challenged, file] },
   );
+}
+
+/**
+ * Record that a file reached a verdict — allowed ones included.
+ *
+ * Called for every intent the hook actually decided, which is what makes an edit
+ * Ichor never saw detectable at the end of the turn.
+ */
+export function markJudged(repoRoot: string, files: string[]): void {
+  const fresh = files.filter((f) => f);
+  if (fresh.length === 0) return;
+  updateTask(repoRoot, (task) => {
+    const seen = new Set(task.judged);
+    const added = fresh.filter((f) => !seen.has(f));
+    return added.length === 0 ? task : { ...task, judged: [...task.judged, ...added] };
+  });
+}
+
+/**
+ * Remember that an unjudged change has been reported, so it is not reported again.
+ *
+ * Keyed by path AND mtime: a repeat of the same change goes quiet, a genuinely new
+ * change to the same file speaks up.
+ */
+export function markUnseenReported(
+  repoRoot: string,
+  entries: { file: string; mtimeMs: number }[],
+): void {
+  if (entries.length === 0) return;
+  updateTask(repoRoot, (task) => {
+    const kept = task.reportedUnseen.filter((r) => !entries.some((e) => e.file === r.file));
+    return { ...task, reportedUnseen: [...kept, ...entries] };
+  });
 }
 
 /** Grow the boundary after a justified expansion. */

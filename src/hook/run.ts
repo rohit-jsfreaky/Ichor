@@ -18,13 +18,14 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { GraphClient, configFromEnv } from '../graph/client.js';
-import { classify, type Verdict } from '../scope/classify.js';
+import { classify, isChallenge, type Verdict } from '../scope/classify.js';
 import { parsePending } from '../scope/pending.js';
 import {
   loadTask,
   toNeighborhood,
   markChallenged,
   markForced,
+  markJudged,
   recordOverlay,
   type OverlayFile,
 } from '../state.js';
@@ -143,6 +144,52 @@ export function formatChallenge(verdict: Verdict, task: string): string {
   return lines.join('\n');
 }
 
+/**
+ * What the file will contain if this tool call goes through.
+ *
+ * A `Write` carries the whole file already. An `Edit` carries only `new_string`,
+ * and parsing that fragment as a module is how an edit that DELETES a widely-used
+ * export looked exactly like one that changed a function's insides — the fragment
+ * shows what arrives and never what leaves.
+ *
+ * At PreToolUse the file on disk is still the old version, so applying the
+ * substitution here gives the exact proposed file. Returns undefined rather than
+ * guessing whenever the old text cannot be found — a stale read, a substitution
+ * appearing more than once, a file too large to be worth it.
+ */
+function proposedContent(
+  repoRoot: string,
+  intent: { operation: string; file: string; content?: string; replace?: { from: string; to: string } },
+): { content?: string; whole: boolean } {
+  // A Write carries the file entire; an Edit's `content` is only `new_string`.
+  const fragment = { content: intent.content, whole: intent.operation === 'create' };
+
+  if (!intent.replace) return fragment;
+
+  let current: string;
+  try {
+    const full = path.join(repoRoot, intent.file);
+    // A file this large is generated or vendored; reading it on every keystroke
+    // costs more than the check is worth.
+    if (fs.statSync(full).size > 2_000_000) return fragment;
+    current = fs.readFileSync(full, 'utf8');
+  } catch {
+    return fragment; // not on disk yet — a create in Edit's clothing
+  }
+
+  const at = current.indexOf(intent.replace.from);
+  if (at === -1) return fragment;
+  // Ambiguous. Two identical passages mean we cannot know which one the host
+  // will replace, and picking wrong would report a surface change that is not
+  // happening.
+  if (current.indexOf(intent.replace.from, at + 1) !== -1) return fragment;
+
+  return {
+    content: current.slice(0, at) + intent.replace.to + current.slice(at + intent.replace.from.length),
+    whole: true,
+  };
+}
+
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
@@ -194,7 +241,13 @@ export async function runHook(): Promise<void> {
     const toolName = String(payload.tool_name ?? '');
     if (!isEditingTool(toolName)) { debug(`not an editing tool (${toolName}) -> allow`); allow(); }
 
-    const { intents } = parseHookInput(payload, repoRoot);
+    const { intents, outside } = parseHookInput(payload, repoRoot);
+
+    // Not this repository, so not Ichor's business. Said out loud rather than
+    // waved through in silence, because "Ichor was quiet" and "Ichor decided this
+    // was none of its concern" are different things to read in a log.
+    for (const p of outside) debug(`${p} is outside the repo -> not judged`);
+
     if (intents.length === 0) { debug('no intents parsed -> allow'); allow(); }
 
     const neighborhood = toNeighborhood(task!);
@@ -211,11 +264,16 @@ export async function runHook(): Promise<void> {
     // is understood when it builds on it two edits later. Name-based and weaker
     // than the graph — never quoted back as evidence (rule 1).
     const overlay: OverlayFile[] = [];
+    // Every file that reaches a decision, allowed ones included. Silence leaves
+    // no other trace, so without this an edit Ichor never saw is indistinguishable
+    // from one it deliberately passed.
+    const judged: string[] = [];
     const seenAt = new Date().toISOString();
 
     for (const intent of intents) {
       if (intent.operation === 'delete') {
         overlay.push({ path: intent.file, calls: [], imports: [], touches: [], routeMethods: [], deleted: true, at: seenAt });
+        judged.push(intent.file);
         continue;
       }
       if (settled.has(intent.file)) {
@@ -224,11 +282,13 @@ export async function runHook(): Promise<void> {
         // the agent pushing it through. Allowed — Ichor is not a blocker — but
         // remembered, so this code never becomes evidence for the next change.
         markForced(repoRoot, intent.file);
+        judged.push(intent.file);
         continue;
       }
       if (Date.now() > deadline) { debug('time budget exhausted -> allow'); break; }
 
-      const pending = intent.content ? parsePending(intent.file, intent.content) : undefined;
+      const proposed = proposedContent(repoRoot, intent);
+      const pending = proposed.content ? parsePending(intent.file, proposed.content) : undefined;
       if (pending) {
         overlay.push({
           path: intent.file,
@@ -247,6 +307,7 @@ export async function runHook(): Promise<void> {
           client,
           neighborhood,
           pending,
+          wholeFile: proposed.whole,
           forced: task!.forced.map((f) => f.file),
         });
       } catch (error) {
@@ -256,12 +317,14 @@ export async function runHook(): Promise<void> {
         continue;
       }
       debug(`${intent.file} -> ${verdict.decision}`);
+      judged.push(intent.file);
 
-      if (verdict.decision === 'SUSPICIOUS' || verdict.decision === 'HUMAN_REVIEW') {
+      if (isChallenge(verdict)) {
         // Record what we learned before challenging: the edit is about to be
         // refused, so nothing here lands on disk, but the challenge itself is
         // state we must not lose.
         recordOverlay(repoRoot, overlay.filter((o) => o.path !== intent.file));
+        markJudged(repoRoot, judged);
         markChallenged(repoRoot, intent.file);
         await client.close();
         deny(formatChallenge(verdict, task!.task));
@@ -270,6 +333,7 @@ export async function runHook(): Promise<void> {
     }
 
     recordOverlay(repoRoot, overlay);
+    markJudged(repoRoot, judged);
     await client.close();
     debug('no challenge raised -> allow');
     allow();

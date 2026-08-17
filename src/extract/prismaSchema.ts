@@ -13,7 +13,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { nodeKey, repoIdFor } from '../ids.js';
+import { nodeKey, normalisePath, repoIdFor } from '../ids.js';
 import type { ModelFact, FieldFact } from './types.js';
 
 export interface PrismaSchema {
@@ -97,37 +97,45 @@ export function parsePrismaSchema(repoRoot: string): PrismaSchema {
   // `model Vendor {  ...  }` — non-greedy body, closing brace at column 0.
   const modelBlock = /^model\s+(\w+)\s*\{([\s\S]*?)^\}/gm;
 
-  for (const match of source.matchAll(modelBlock)) {
-    const modelName = match[1];
-    const body = match[2];
+  // One file at a time, rather than every schema concatenated. Joining them lost
+  // which file declared which model, and that is exactly what makes a schema
+  // edit understandable instead of unexplained.
+  for (const schemaPath of schemaPaths) {
+    const source = fs.readFileSync(schemaPath, 'utf8');
+    const file = normalisePath(schemaPath, repoRoot);
 
-    const modelKey = nodeKey(repoId, 'model', modelName);
-    if (seen.has(modelKey)) continue;
-    seen.add(modelKey);
-    models.push({ key: modelKey, name: modelName });
+    for (const match of source.matchAll(modelBlock)) {
+      const modelName = match[1];
+      const body = match[2];
 
-    for (const rawLine of body.split('\n')) {
-      const line = stripComment(rawLine).trim();
-      if (!line || line.startsWith('@@')) continue;
+      const modelKey = nodeKey(repoId, 'model', modelName);
+      if (seen.has(modelKey)) continue;
+      seen.add(modelKey);
+      models.push({ key: modelKey, name: modelName, file });
 
-      // `email String @unique` — name, type, then attributes.
-      const field = /^(\w+)\s+([\w\[\]?]+)(.*)$/.exec(line);
-      if (!field) continue;
+      for (const rawLine of body.split('\n')) {
+        const line = stripComment(rawLine).trim();
+        if (!line || line.startsWith('@@')) continue;
 
-      const [, fieldName, fieldType, attributes] = field;
+        // `email String @unique` — name, type, then attributes.
+        const field = /^(\w+)\s+([\w\[\]?]+)(.*)$/.exec(line);
+        if (!field) continue;
 
-      const fieldKey = nodeKey(repoId, 'field', `${modelName}.${fieldName}`);
-      if (seen.has(fieldKey)) continue;
-      seen.add(fieldKey);
+        const [, fieldName, fieldType, attributes] = field;
 
-      fields.push({
-        key: fieldKey,
-        model: modelName,
-        name: fieldName,
-        type: fieldType,
-        isUnique: /@unique\b/.test(attributes),
-        isId: /@id\b/.test(attributes),
-      });
+        const fieldKey = nodeKey(repoId, 'field', `${modelName}.${fieldName}`);
+        if (seen.has(fieldKey)) continue;
+        seen.add(fieldKey);
+
+        fields.push({
+          key: fieldKey,
+          model: modelName,
+          name: fieldName,
+          type: fieldType,
+          isUnique: /@unique\b/.test(attributes),
+          isId: /@id\b/.test(attributes),
+        });
+      }
     }
   }
 

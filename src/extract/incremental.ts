@@ -46,6 +46,15 @@ const FULL_READ_THRESHOLD = 0.5;
 
 export interface FileCache {
   version: 2;
+  /**
+   * What the graph held for this repo after the last write.
+   *
+   * Kept next to the file hashes because it answers the same kind of question:
+   * what did we do last time, so we only have to do the difference. Without it a
+   * refresh re-upserts every edge, which is what made `ichor start` exceed the
+   * engine's 30-second statement limit on a real repository.
+   */
+  edges?: Record<string, string>;
   /** repo-relative path -> content hash */
   hashes: Record<string, string>;
   /** repo-relative path -> its symbol table, so importers can resolve without a re-parse */
@@ -99,9 +108,34 @@ function reviveSymbols(cache: FileCache): Map<string, FileSymbols> {
   return tables;
 }
 
-/** Every source file on disk now, repo-relative and POSIX. */
-function sourcesOnDisk(root: string): Map<string, string> {
+/**
+ * Every file the graph holds, with its current hash.
+ *
+ * TWO SOURCES, AND THE SECOND ONE IS WHY THIS IS NOT A PATTERN MATCH.
+ *
+ * The walk finds TypeScript, because that is what a NEW file will be. But
+ * `facts.files` also contains things the walk does not look for — Prisma schemas,
+ * and any asset a TypeScript file imports — and a file in the previous facts that
+ * is missing from this map reads as DELETED, which forces a full re-read. Not
+ * occasionally: on EVERY refresh, silently throwing away the whole incremental path
+ * while all five of its checks still pass.
+ *
+ * That happened once with `.prisma`, and was fixed by adding an extension to a list.
+ * The list was the real bug — it has to be edited every time a new kind of file
+ * enters the graph, and forgetting is invisible. So the rule is now "whatever the
+ * graph holds, we track", taken from the previous facts instead of a pattern.
+ */
+function sourcesOnDisk(root: string, alsoTrack: string[] = []): Map<string, string> {
   const found = new Map<string, string>();
+
+  const hash = (relative: string): void => {
+    try {
+      found.set(relative, hashOf(fs.readFileSync(path.join(root, relative), 'utf8')));
+    } catch {
+      /* unreadable or gone — absent from the map, which reads as changed or deleted */
+    }
+  };
+
   const walk = (dir: string) => {
     let entries: fs.Dirent[];
     try {
@@ -114,16 +148,17 @@ function sourcesOnDisk(root: string): Map<string, string> {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
       else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
-        const rel = path.relative(root, full).replace(/\\/g, '/');
-        try {
-          found.set(rel, hashOf(fs.readFileSync(full, 'utf8')));
-        } catch {
-          /* unreadable — skip, it will look changed next time */
-        }
+        hash(path.relative(root, full).replace(/\\/g, '/'));
       }
     }
   };
   walk(root);
+
+  // Everything else the graph already knows about, whatever its extension.
+  for (const relative of alsoTrack) {
+    if (!found.has(relative)) hash(relative);
+  }
+
   return found;
 }
 
@@ -161,7 +196,7 @@ export function analyzeIncremental(
 
   if (!previous || !cache || cache.version !== 2) return full();
 
-  const onDisk = sourcesOnDisk(root);
+  const onDisk = sourcesOnDisk(root, previous.files.map((f) => f.path));
   const known = new Set(previous.files.map((f) => f.path));
 
   const changed = new Set<string>();

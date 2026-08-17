@@ -24,6 +24,15 @@ import { saveTask, loadTask, clearTask, stateDir, writeAtomic } from './state.js
 import { analyzeAndPersist, refresh } from './refresh/refresh.js';
 import { watchPath, isWatching } from './hook/prompt.js';
 import { runHook } from './hook/run.js';
+import {
+  clearStoredKey,
+  credentialsPath,
+  looksLikeOpenRouterKey,
+  maskKey,
+  readStoredKey,
+  readStoredSetAt,
+  writeStoredKey,
+} from './judge/credentials.js';
 import { installHooks } from './hook/install.js';
 import { up, down, isRunning } from './stack/stack.js';
 
@@ -247,6 +256,117 @@ program
     if (fs.existsSync(watchPath(repoRoot))) fs.rmSync(watchPath(repoRoot));
     console.log(`\nTask closed, and no longer watching. Re-arm with: ichor watch\n`);
   });
+
+/**
+ * Store an OpenRouter key so the Judge can be used.
+ *
+ * Ichor works fully without one, and this command exists so that trying the part
+ * that needs a key is one line rather than a shell-export ritual repeated in every
+ * terminal that might launch an agent. The alternative people reach for — pasting a
+ * key into a file inside the repo — is one `git add -A` from being published.
+ *
+ * The key is written to the HOME directory, never here. See judge/credentials.ts.
+ */
+program
+  .command('key [value]')
+  .description('store your own OpenRouter key, so the Judge can weigh an argument')
+  .option('--remove', 'delete the stored key')
+  .option('--no-check', 'skip asking OpenRouter whether the key works')
+  .action(async (value: string | undefined, options: { remove?: boolean; check?: boolean }) => {
+    if (options.remove) {
+      console.log(
+        clearStoredKey()
+          ? `\nStored key removed. Ichor still works — an argument alone will no longer grant an expansion.\n`
+          : `\nThere was no stored key to remove.\n`,
+      );
+      return;
+    }
+
+    // No argument: report, never print the key.
+    if (!value) {
+      const fromEnv =
+        process.env.ICHOR_OPENROUTER_KEY ??
+        process.env.OPENROUTER_API_KEY ??
+        process.env.OPENROUTER_KEY;
+      const stored = readStoredKey();
+
+      console.log('');
+      if (fromEnv) {
+        console.log(`  key   ${maskKey(fromEnv)}   from the environment`);
+        if (stored) console.log(`        (a stored key exists too; the environment wins)`);
+      } else if (stored) {
+        const setAt = readStoredSetAt();
+        console.log(`  key   ${maskKey(stored)}   ${credentialsPath()}`);
+        if (setAt) console.log(`        set ${setAt}`);
+      } else {
+        console.log('  key   not set');
+        console.log('');
+        console.log('  Ichor works without one. Every boundary, every challenge and every');
+        console.log('  retrieval tool needs no key — what a key adds is the ability to WEIGH an');
+        console.log("  agent's argument that an expansion is necessary. Without it, an argument");
+        console.log('  Ichor cannot verify comes to you instead of being granted.');
+        console.log('');
+        console.log('  Set one:  ichor key sk-or-…        (from https://openrouter.ai/keys)');
+      }
+      console.log('');
+      return;
+    }
+
+    const shape = looksLikeOpenRouterKey(value);
+    if (!shape.ok) {
+      console.log(`\n  That does not look like an OpenRouter key — ${shape.why}\n`);
+      process.exitCode = 1;
+      return;
+    }
+
+    /**
+     * Ask OpenRouter whether the key works, before storing it.
+     *
+     * A key that is wrong by one character fails silently later: the Judge degrades
+     * to the graph-only verdict, which is exactly what a MISSING key does, so there
+     * is nothing to notice. One request now turns that into an answer.
+     */
+    if (options.check !== false) {
+      process.stdout.write('\n  checking the key with OpenRouter… ');
+      const ok = await checkKey(value);
+      if (ok === false) {
+        console.log('rejected.\n\n  OpenRouter did not accept that key. Nothing was stored.\n');
+        process.exitCode = 1;
+        return;
+      }
+      console.log(ok === true ? 'accepted.' : 'could not reach OpenRouter — storing it anyway.');
+    }
+
+    const file = writeStoredKey(value);
+    console.log(`\n  Stored ${maskKey(value)} in ${file}`);
+    console.log('  Readable only by you, and outside every repository so it cannot be committed.');
+    console.log('\n  The Judge is now available. It is consulted only when an agent argues that an');
+    console.log('  expansion is necessary — never on an ordinary edit — and is capped per task');
+    console.log('  and per file, so a long session cannot run away with your credit.\n');
+  });
+
+/**
+ * Does OpenRouter accept this key?
+ *
+ * `true` accepted, `false` rejected, `undefined` we could not tell — which is
+ * treated as "store it" rather than "refuse", because a developer offline on a
+ * train has still given us the right key.
+ */
+async function checkKey(key: string): Promise<boolean | undefined> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    const response = await fetch('https://openrouter.ai/api/v1/key', {
+      headers: { authorization: `Bearer ${key}` },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (response.status === 401 || response.status === 403) return false;
+    return response.ok ? true : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 program
   .command('hook', { hidden: true })

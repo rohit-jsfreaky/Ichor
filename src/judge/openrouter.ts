@@ -8,6 +8,8 @@
  * Deliberately fetch() and not an SDK: one endpoint, one request shape.
  */
 
+import { readStoredKey } from './credentials.js';
+
 export interface OpenRouterConfig {
   apiKey?: string;
   /** Tried in order. First to answer wins. */
@@ -16,12 +18,22 @@ export interface OpenRouterConfig {
 }
 
 export function judgeConfigFromEnv(): OpenRouterConfig {
-  // Accept both spellings — ICHOR_* is the documented one, OPENROUTER_* is what
-  // most people already have exported.
+  /**
+   * Environment first, stored key second.
+   *
+   * That order matters for CI and for anyone juggling two accounts: an explicitly
+   * exported variable is a deliberate act for this one process, and it must beat a
+   * file set weeks ago. `ichor key` writes the file — see credentials.ts for why it
+   * lives in the home directory rather than the repository.
+   *
+   * Both spellings are accepted because ICHOR_* is the documented one and
+   * OPENROUTER_* is what people already have exported.
+   */
   const apiKey =
     process.env.ICHOR_OPENROUTER_KEY ??
     process.env.OPENROUTER_API_KEY ??
-    process.env.OPENROUTER_KEY;
+    process.env.OPENROUTER_KEY ??
+    readStoredKey();
 
   const configured = process.env.ICHOR_JUDGE_MODEL ?? process.env.OPENROUTER_MODEL;
 

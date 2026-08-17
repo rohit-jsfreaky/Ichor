@@ -234,6 +234,7 @@
       <a href="#agents">Agents</a>
       <a href="#proof">Proof</a>
       <a href="#install">Install</a>
+      <a href="./docs.html">Docs</a>
       <a class="keep" href="https://github.com/rohit-jsfreaky/ichor">GitHub</a>
     </nav>
   </div>
@@ -555,12 +556,24 @@
         </tbody>
       </table>
 
-      <p style="margin-top:34px;max-width:640px;color:var(--dim);line-height:1.7">
-        The agent can also just ask. Before writing a line, a real Codex run searched the repo for
-        five words, got 116 hits and read six whole files — working out which code the task lived in.
-        Ichor had answered that in 14ms and could have simply been asked.
+      <h3 style="margin-top:44px">Half Of It Is Not Policing At All</h3>
+      <p style="margin-top:14px;max-width:700px;color:var(--dim);line-height:1.7">
+        Your agent is about to go and grep for something the graph already knows. Before writing a
+        line, a real Codex run searched the repo for five words, got <strong style="color:var(--fg);font-weight:400">116
+        hits</strong> and read <strong style="color:var(--fg);font-weight:400">six entire files</strong>
+        — working out where the task lived. Ichor had that answer in <strong style="color:var(--acid);font-weight:400">14ms</strong>.
       </p>
       <div class="grid grid-2" style="margin-top:22px">
+        <div class="card">
+          <span class="num">ICHOR_FIND</span>
+          <h3>Where Does This Live?</h3>
+          <p>Describe it in plain words — "the place invites are created". You never have to guess a name, because it searches structure, not text.</p>
+        </div>
+        <div class="card">
+          <span class="num">ICHOR_IMPACT</span>
+          <h3>What Breaks If I Change It?</h3>
+          <p>Who calls it, which endpoints end up running it, which tables are at stake, and who depends on its shape. Ask before editing, not after.</p>
+        </div>
         <div class="card">
           <span class="num">ICHOR_CALLERS</span>
           <h3>Who Uses This?</h3>
@@ -572,6 +585,14 @@
           <p>Which endpoints can end up touching a table, and through which function. No file search can answer that one.</p>
         </div>
       </div>
+
+      <p style="margin-top:26px;max-width:700px;color:var(--faint);font-size:14px;line-height:1.7">
+        A live Claude Code session, told to use only these tools, answered "where is duplicate email
+        handling, and what breaks if I change createVendor?" in nine calls — and found that this
+        repo's own <code style="font-family:var(--mono);font-size:13px">DuplicateVendorEmailError</code>
+        is never called by anything. A grep for "duplicate" finds that file and tells you nothing
+        about whether it is wired in.
+      </p>
     </div>
   </section>
 
@@ -591,32 +612,27 @@
       <div class="grid grid-3">
         <div class="card">
           <span class="num">FALSE ALARMS</span>
-          <div class="stat"><span class="was">62.7%</span>19.3%</div>
-          <p class="stat-note">Share of edits a developer genuinely had to make that Ichor would have interrupted. The first number is where this started.</p>
+          <div class="stat">12.8%</div>
+          <p class="stat-note">Share of edits a developer genuinely had to make that Ichor would have interrupted. By file type: 10 of 45 <code>.ts</code>, 1 of 26 <code>.tsx</code>, 0 of 2 <code>.prisma</code>, and none at all outside TypeScript.</p>
         </div>
         <div class="card">
           <span class="num">EVIDENCE</span>
-          <div class="stat">30</div>
-          <p class="stat-note">Real commits from a real product, replayed through the real classifier. Each commit message is the task; the files it changed are the truth.</p>
+          <div class="stat">86</div>
+          <p class="stat-note">Files changed across 30 real commits from a real product, replayed through the real classifier. Each commit message is the task; the files it changed are the truth. Every file type, not just the ones Ichor reads.</p>
         </div>
         <div class="card">
           <span class="num">SPEED</span>
-          <div class="stat">5s</div>
-          <p class="stat-note">To catch up after you edit a file in a 4,975-file codebase. A first full read of that repo takes 35 seconds.</p>
+          <div class="stat">6s</div>
+          <p class="stat-note">To catch up after you edit a file in a 1,362-file codebase. A first full read of that repo takes 25 seconds, and the largest tested — 7,735 files — is read at Node's default heap.</p>
         </div>
       </div>
 
       <p style="margin-top:26px;color:var(--dim);font-size:15px;max-width:760px;line-height:1.6">
-        That first measurement is why this section exists. Ten-out-of-ten on an eleven-file demo was
-        hiding a tool that interrupted <strong style="color:var(--fg);font-weight:400">nearly two
-        thirds</strong> of genuine work on a real codebase. Four defects came out of it, none of
-        them a number that needed tuning.
-      </p>
-      <p style="margin-top:14px;color:var(--faint);font-size:14px;max-width:760px;line-height:1.6">
-        Being honest about it: a real commit is not always one clean task — developers bundle
-        incidental changes — so some of that 19.3% may be Ichor correctly questioning a tangential
-        edit. Nothing separates those, and no credit is claimed for it. One repository, 30 commits,
-        TypeScript.
+        Passing your own tests on your own demo cannot tell you this. Ichor's own suite runs against an
+        eleven-file app, so the measurement that matters is replayed against somebody else's product:
+        each commit message is the task, and the files it changed are what a developer genuinely had to
+        touch. Reproduce it with
+        <code style="font-family:var(--mono);font-size:13px">scripts/ground-truth.ts</code>.
       </p>
     </div>
   </section>
@@ -650,7 +666,7 @@
   <span class="ok">Watching. Run your agent as usual — Ichor picks the task up from your prompts.</span></div>
       </div>
       <p style="margin-top:22px;color:var(--faint);font-size:14px">
-        Requires Node 20+, Docker, and a TypeScript repo — ideally Next.js with Prisma.
+        Requires Node 20+, Docker, and a TypeScript repo — ideally Next.js with Prisma. One database per repo.
         Prefer to name the task yourself? <code style="font-family:var(--mono)">ichor start "…"</code> still does exactly that.
       </p>
     </div>
@@ -666,8 +682,12 @@
       </div>
       <ul class="plain">
         <li><strong style="color:var(--fg);font-weight:400">TypeScript and JavaScript only.</strong> Python is next. Nothing else is claimed.</li>
+        <li><strong style="color:var(--fg);font-weight:400">It still questions about one edit in eight</strong> that a developer would have made anyway. Measured, not estimated. Every remaining case is a file the boundary did not reach, rather than a file type it refuses to read.</li>
+        <li><strong style="color:var(--fg);font-weight:400">Describe a task in words and the scope is a superset; name the file and it is not.</strong> A prompt naming no path is matched on its words, and on a large repo that reaches wider than the job does — which means fewer challenges, not more, and the one-in-eight figure above is what it costs. Name a path and Ichor scopes to that file and its graph neighbours instead: measured live on a 1,362-file repo, 800 functions of guesswork down to the 9 in the file you pointed at.</li>
+        <li><strong style="color:var(--fg);font-weight:400">One database per repository.</strong> Projects never bleed into each other — that is tested with four at once — but HydraDB has no property indexes, so scoping a query to one repo is a scan that grows with the whole database. Three share one comfortably; more will not.</li>
+        <li><strong style="color:var(--fg);font-weight:400">A first read of a large repository takes tens of seconds.</strong> 25s for 1,362 files, 82s for 7,735. Once, then refreshes are seconds.</li>
         <li><strong style="color:var(--fg);font-weight:400">Static analysis.</strong> Dynamic dispatch and runtime-constructed calls are invisible, so results are a floor and never a ceiling.</li>
-        <li><strong style="color:var(--fg);font-weight:400">Shell writes cannot be challenged.</strong> Ichor hooks the agents' edit tools, and a file written by <code style="font-family:var(--mono);font-size:13px">cat &gt;</code> or a codegen script never announces itself — you would have to predict what an arbitrary command will write. It shows up on the map at the next rebuild, so Ichor catches up; it just cannot ask why in the moment.</li>
+        <li><strong style="color:var(--fg);font-weight:400">Shell writes cannot be challenged, only accounted for.</strong> Ichor hooks the agents' edit tools, and a file written by <code style="font-family:var(--mono);font-size:13px">cat &gt;</code> or a codegen script never announces itself — you would have to predict what an arbitrary command will write. So at the end of the turn Ichor names every file that changed without ever reaching a verdict. It cannot ask why in the moment; it will not pretend it was asked.</li>
         <li><strong style="color:var(--fg);font-weight:400">Task detection can be wrong.</strong> It moves the boundary only when a prompt points somewhere the boundary does not cover. <code style="font-family:var(--mono);font-size:13px">ichor status</code> always shows what it decided, and naming a task by hand overrides it.</li>
         <li><strong style="color:var(--fg);font-weight:400">The graph is rebuilt between turns, not during them.</strong> Within a single turn it can be a few edits behind.</li>
         <li><strong style="color:var(--fg);font-weight:400">One conversation at a time per repo.</strong> Two agent sessions in the same checkout share one boundary.</li>

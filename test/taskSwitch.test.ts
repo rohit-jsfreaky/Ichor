@@ -10,7 +10,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { buildNameIndex, classifyPrompt, type BoundaryView } from '../src/scope/taskSwitch.js';
+import {
+  buildNameIndex,
+  classifyPrompt,
+  isQuestion,
+  type BoundaryView,
+} from '../src/scope/taskSwitch.js';
+import { namedTokens } from '../src/scope/named.js';
 import type { GraphFacts } from '../src/extract/types.js';
 
 /** A stand-in for the demo app, plus enough unrelated modules to test spread. */
@@ -240,5 +246,190 @@ describe('explainability', () => {
   it('never reports a term as both inside and outside', () => {
     const result = classifyPrompt('add invoicing for vendors', index, vendorBoundary);
     for (const term of result.insideHits) expect(result.outsideHits).not.toContain(term);
+  });
+});
+
+/**
+ * The transcripts these came from are in BUGS.md, bugs 4 and 7.
+ *
+ * Both were found in real Claude Code sessions on papermark, and both passed every
+ * one of the 109 unit tests that existed at the time.
+ */
+describe('a prompt that names something outright (bug 4)', () => {
+  it('does not read a named outside file as the same job', () => {
+    // The real transcript. It was classified SAME on the words `extract, file,
+    // update, imports` — `src/lib/billing/invoice.ts` was shredded into `src`,
+    // `lib`, `billing`, `invoice`, `ts`, and the structural ones were discarded.
+    const result = classifyPrompt(
+      'Also refactor src/lib/billing/invoice.ts: extract the createInvoice helper into its own file and update imports',
+      index,
+      vendorBoundary,
+    );
+    expect(result.verdict).not.toBe('SAME');
+    expect(result.namedOutside.length).toBeGreaterThan(0);
+  });
+
+  it('says which named thing moved it', () => {
+    const result = classifyPrompt(
+      'now update src/lib/billing/invoice.ts',
+      index,
+      vendorBoundary,
+    );
+    expect(result.reason).toMatch(/invoice\.ts/);
+  });
+
+  it('keeps a two-character identifier, which used to be dropped', () => {
+    const { identifiers } = namedTokens('extract the `cn` helper into its own file');
+    expect(identifiers).toContain('cn');
+  });
+
+  it('does not invent an identifier out of an ordinary word', () => {
+    // "extract the file" must not name a symbol called `file`; that is the
+    // fuzzy-overlap failure this whole branch exists to avoid.
+    const { identifiers } = namedTokens('extract the file and update the imports');
+    expect(identifiers).toEqual([]);
+  });
+
+  it('reads a path however it is written', () => {
+    for (const written of [
+      'src/lib/billing/invoice.ts',
+      './src/lib/billing/invoice.ts',
+      '`src/lib/billing/invoice.ts`',
+      'edit src/lib/billing/invoice.ts now',
+    ]) {
+      expect(namedTokens(written).paths).toContain('src/lib/billing/invoice.ts');
+    }
+  });
+
+  it('ignores a name the repo does not have', () => {
+    // An invented symbol is not evidence about where the developer is working.
+    const result = classifyPrompt('rework the FlibbertyGibbet handler', index, vendorBoundary);
+    expect(result.namedOutside).toEqual([]);
+  });
+
+  it('still says SAME when the named file IS the boundary', () => {
+    const result = classifyPrompt(
+      'in src/lib/vendors/create.ts, also handle the empty-name case',
+      index,
+      vendorBoundary,
+    );
+    expect(result.verdict).toBe('SAME');
+  });
+});
+
+describe('a question is not a task (bug 7)', () => {
+  it('recognises the prompt that set a 374-function boundary', () => {
+    expect(isQuestion('Where is link expiry enforced?')).toBe(true);
+  });
+
+  it('recognises questions without a question mark', () => {
+    for (const prompt of [
+      'where is duplicate email handling in this codebase',
+      'how does the vendor submit flow work',
+      'what calls createVendor',
+      'is there a toast helper already',
+    ]) {
+      expect(isQuestion(prompt), prompt).toBe(true);
+    }
+  });
+
+  it('treats a politely-phrased instruction as work, not curiosity', () => {
+    // The expensive mistake is this direction: reading "could you fix X?" as a
+    // question leaves Ichor silent through the entire change.
+    for (const prompt of [
+      'could you fix the duplicate email crash?',
+      'can you add a toast when the email already exists?',
+      'would you mind refactoring the vendor form?',
+      'how about we rename createVendor to addVendor?',
+    ]) {
+      expect(isQuestion(prompt), prompt).toBe(false);
+    }
+  });
+
+  it('treats a plain instruction as work', () => {
+    for (const prompt of [
+      'fix the duplicate email crash in vendor onboarding',
+      'add a toast saying the email already exists',
+      'now do the billing rounding',
+    ]) {
+      expect(isQuestion(prompt), prompt).toBe(false);
+    }
+  });
+});
+
+/**
+ * Bug 12, from a live session on a 7,741-file monorepo.
+ *
+ * Every prompt was filed as noise — *"outside matches too scattered (6,453 files) to
+ * be a task"* — including ones that named a file outright. The spread guard was
+ * counting named paths alongside fuzzy word matches, so one typed filename was
+ * buried under thousands of incidental hits and the boundary could never move.
+ */
+describe('a named file survives a noisy sentence (bug 12)', () => {
+  /** A repo where one ordinary word matches almost everything, as on a monorepo. */
+  const noisyIndex = buildNameIndex(
+    {
+      files: Array.from({ length: 400 }, (_, i) => ({
+        key: `file:backend/src/services/thing${i}/service.ts`,
+        path: `backend/src/services/thing${i}/service.ts`,
+      })),
+      functions: Array.from({ length: 400 }, (_, i) => ({
+        key: `function:backend/src/services/thing${i}/service.ts#serviceHandler${i}`,
+        name: `serviceHandler${i}`,
+        file: `backend/src/services/thing${i}/service.ts`,
+        line: 1,
+        exported: true,
+        isComponent: false,
+        isTest: false,
+      })),
+      routes: [],
+      models: [],
+      fields: [],
+      types: [],
+      calls: [],
+      references: [],
+      touches: [],
+      imports: [],
+      stats: {},
+    } as unknown as GraphFacts,
+    '2026-08-17T00:00:00.000Z',
+  );
+
+  const somewhereElse: BoundaryView = {
+    names: ['serviceHandler7'],
+    files: ['backend/src/services/thing7/service.ts'],
+  };
+
+  it('does not bury one typed filename under thousands of incidental matches', () => {
+    const result = classifyPrompt(
+      'Do it now, no questions: in backend/src/services/thing300/service.ts set the retry attempts to 3. Just make that one edit.',
+      noisyIndex,
+      somewhereElse,
+    );
+    // The word "service" alone matches every file here — exactly the condition that
+    // made a live session ignore every instruction.
+    expect(result.outsideFiles.length).toBeGreaterThan(50);
+    expect(result.verdict).not.toBe('NO_SIGNAL');
+    expect(result.namedOutside).toContain('backend/src/services/thing300/service.ts');
+  });
+
+  it('still refuses a wall of pasted paths, however noisy the words', () => {
+    const trace = [
+      'it crashed:',
+      ...Array.from({ length: 10 }, (_, i) => `    at serviceHandler${i} (backend/src/services/thing${i}/service.ts:3)`),
+    ].join('\n');
+
+    const result = classifyPrompt(trace, noisyIndex, somewhereElse);
+    expect(result.verdict).toBe('NO_SIGNAL');
+    expect(result.reason).toMatch(/scattered/);
+  });
+
+  it('treats two or three named files as a statement, not a paste', () => {
+    const result = classifyPrompt(
+      'update backend/src/services/thing11/service.ts and backend/src/services/thing12/service.ts',
+      noisyIndex,
+      somewhereElse,
+    );
+    expect(result.verdict).not.toBe('NO_SIGNAL');
   });
 });

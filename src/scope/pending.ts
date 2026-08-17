@@ -32,10 +32,32 @@ export interface PendingFacts {
   routeMethods: string[];
   /** Derived URL path when the file location looks like an App Router route. */
   routePath?: string;
+  /**
+   * Names this file exports, read from syntax.
+   *
+   * The file's public surface — what other code is allowed to depend on. Compared
+   * against what the graph already records so that REMOVING an export can be
+   * distinguished from changing a function's insides: the first breaks callers,
+   * the second is ordinary work.
+   */
+  exportedNames: string[];
   /** True for *.test.ts / *.spec.ts. */
   isTest: boolean;
   /** Set when the content could not be parsed — classification must not guess. */
   parseError?: string;
+  /**
+   * Syntax errors in the content, counted.
+   *
+   * A half-applied edit is routinely invalid: an agent inserting `try {` now and
+   * `} catch {}` on the next call produces an unbalanced file in between, and
+   * ts-morph recovers from that silently rather than failing. The recovered tree
+   * simply stops early — so every export below the break looks DELETED.
+   *
+   * That challenged an ordinary edit to `createVendor` for "no longer exporting"
+   * two functions that were never touched. Anything reasoning about what a file
+   * does or does not contain has to know the parse was clean first.
+   */
+  syntaxErrors: number;
 }
 
 /** Shared, so repeated hook calls do not each build a compiler instance. */
@@ -54,6 +76,8 @@ export function parsePending(repoRelativePath: string, content: string): Pending
     callsNames: [],
     touches: [],
     routeMethods: [],
+    exportedNames: [],
+    syntaxErrors: 0,
     isTest: /\.(test|spec)\.tsx?$/.test(repoRelativePath),
   };
 
@@ -70,6 +94,17 @@ export function parsePending(repoRelativePath: string, content: string): Pending
   }
 
   try {
+    /**
+     * The PARSER's own errors, not the type checker's.
+     *
+     * `parseDiagnostics` is internal to the TypeScript API, and it is the only way
+     * to ask this question cheaply: `getPreEmitDiagnostics()` answers it too but
+     * builds the whole Program and resolves every import into node_modules — the
+     * exact cost that made `analyzeRepo` run out of memory on three real repos.
+     */
+    const parsed = source.compilerNode as unknown as { parseDiagnostics?: unknown[] };
+    facts.syntaxErrors = parsed.parseDiagnostics?.length ?? 0;
+
     // ---- imports --------------------------------------------------------
     for (const declaration of source.getImportDeclarations()) {
       const specifier = declaration.getModuleSpecifierValue();
@@ -122,6 +157,37 @@ export function parsePending(repoRelativePath: string, content: string): Pending
       }
     }
 
+    // ---- exported surface -------------------------------------------------
+    //
+    // Syntax only. `getExportedDeclarations()` answers the same question through
+    // the type checker, which builds the whole Program and resolves every import
+    // into node_modules — measured at 13.7 seconds on 49 route files, and the
+    // reason `analyzeRepo` ran out of memory on three real repositories.
+    const keyword = (node: { hasExportKeyword?: () => boolean }) => node.hasExportKeyword?.() === true;
+
+    for (const fn of source.getFunctions()) {
+      const name = fn.getName();
+      if (name && keyword(fn)) facts.exportedNames.push(name);
+    }
+    for (const declaration of [
+      ...source.getClasses(),
+      ...source.getInterfaces(),
+      ...source.getTypeAliases(),
+      ...source.getEnums(),
+    ]) {
+      const name = declaration.getName();
+      if (name && keyword(declaration)) facts.exportedNames.push(name);
+    }
+    for (const variable of source.getVariableDeclarations()) {
+      if (keyword(variable)) facts.exportedNames.push(variable.getName());
+    }
+    // `export { a, b as c }` — the LOCAL name, since that is what the graph holds.
+    for (const declaration of source.getExportDeclarations()) {
+      if (declaration.getModuleSpecifier()) continue; // a re-export, declared elsewhere
+      for (const spec of declaration.getNamedExports()) facts.exportedNames.push(spec.getName());
+    }
+
+    facts.exportedNames = [...new Set(facts.exportedNames)];
     facts.callsNames = [...new Set(facts.callsNames)];
     facts.importsRepoFiles = [...new Set(facts.importsRepoFiles)];
   } catch (error) {

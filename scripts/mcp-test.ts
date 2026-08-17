@@ -10,8 +10,7 @@
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import * as path from 'node:path';
-import { analyzeRepo } from '../src/extract/analyze.js';
-import { writeGraph } from '../src/graph/write.js';
+import { analyzeAndPersist } from '../src/refresh/refresh.js';
 import { GraphClient, configFromEnv } from '../src/graph/client.js';
 import { findAnchors } from '../src/scope/anchors.js';
 import { buildNeighborhood } from '../src/scope/neighborhood.js';
@@ -38,9 +37,10 @@ class McpClient {
   private pending = new Map<number, (value: Record<string, unknown>) => void>();
   private nextId = 1;
 
-  constructor() {
+  constructor(env: NodeJS.ProcessEnv = {}) {
     this.child = spawn(process.execPath, [CLI, 'mcp', '--repo', REPO], {
       stdio: ['pipe', 'pipe', 'inherit'],
+      env: { ...process.env, ...env },
     }) as unknown as ChildProcessWithoutNullStreams;
 
     this.child.stdout.on('data', (chunk: Buffer) => {
@@ -94,10 +94,15 @@ function check(label: string, condition: boolean, detail?: string) {
 
 async function main() {
   // Open a real task so the tools have something to answer about.
-  const facts = analyzeRepo(REPO);
+  //
+  // analyzeAndPersist, not analyzeRepo — it also writes `.ichor/facts.json`,
+  // which is what `ichor watch` leaves behind and what the retrieval tools read.
+  // Building only the graph left a stale cache from an older schema in place,
+  // and ichor_find answered from that.
   const client = new GraphClient(configFromEnv());
+  let facts;
   try {
-    await writeGraph(client, facts);
+    facts = await analyzeAndPersist(REPO, client);
     const { anchors, terms } = findAnchors(facts, TASK);
     saveTask(REPO, await buildNeighborhood(client, TASK, anchors, terms));
   } finally {
@@ -127,6 +132,8 @@ async function main() {
       'ichor_explain',
       'ichor_request_scope_expansion',
       'ichor_callers',
+      'ichor_find',
+      'ichor_impact',
       'ichor_paths',
     ];
     const missing = expected.filter((n) => !names.includes(n));
@@ -223,6 +230,97 @@ async function main() {
       }),
     );
     check('ichor_paths honours the route filter', filtered.includes('/api/vendors'), filtered);
+
+    // ---- retrieval: the half of Ichor that helps rather than polices --------
+    //
+    // These two exist because an agent otherwise greps. A real Codex run searched
+    // five words, got 116 hits and read six whole files to answer something the
+    // graph already knew.
+    const found = textOf(
+      await mcp.request('tools/call', {
+        name: 'ichor_find',
+        arguments: { query: 'where duplicate emails are handled when creating a vendor' },
+      }),
+    );
+    check(
+      'ichor_find locates the code from a plain description',
+      /createVendor|DuplicateVendorEmailError|isDuplicateEmailError/.test(found),
+      found,
+    );
+
+    const nothing = textOf(
+      await mcp.request('tools/call', {
+        name: 'ichor_find',
+        arguments: { query: 'kubernetes helm chart rollout strategy' },
+      }),
+    );
+    check(
+      'ichor_find says so rather than inventing a match',
+      nothing.includes('Nothing in the compiled graph matches') || !/createVendor/.test(nothing),
+      nothing,
+    );
+
+    /**
+     * A slow lookup must hand the question back, not make the agent wait.
+     *
+     * A tool that FAILS is recovered from instantly; a tool that is merely SLOW blocks
+     * with no signal to fall back on. One real session spent ~38 seconds inside a
+     * single `ichor_impact` call — never explained, and not reproducible: the same
+     * query measures 150–600ms, and both candidate causes (database size, contention
+     * with a rebuild) were tested and disproved.
+     *
+     * So the guarantee is a bound rather than a cause. Forced here with a 1ms budget,
+     * because the only honest way to test a timeout is to make it certain.
+     */
+    const budgeted = new McpClient({ ICHOR_RETRIEVAL_BUDGET_MS: '1' });
+    try {
+      await budgeted.request('initialize', {});
+      const handedBack = textOf(
+        await budgeted.request('tools/call', {
+          name: 'ichor_impact',
+          arguments: { symbol: 'createVendor' },
+        }),
+      );
+      check(
+        'a retrieval tool over budget tells the agent to use its own search',
+        /did not answer within/.test(handedBack) && /own search tools/.test(handedBack),
+        handedBack,
+      );
+      check(
+        'and says the code is fine, only the lookup was slow',
+        /Nothing is wrong with the code/.test(handedBack),
+        handedBack,
+      );
+    } finally {
+      budgeted.close();
+    }
+
+    const impact = textOf(
+      await mcp.request('tools/call', { name: 'ichor_impact', arguments: { symbol: 'createVendor' } }),
+    );
+    check(
+      'ichor_impact reports callers, endpoints and the data at stake',
+      impact.includes('called by') && impact.includes('Vendor'),
+      impact,
+    );
+
+    const typeImpact = textOf(
+      await mcp.request('tools/call', { name: 'ichor_impact', arguments: { symbol: 'NewVendor' } }),
+    );
+    check(
+      'ichor_impact reports who depends on a type\'s shape',
+      typeImpact.includes('shape depended on by') || typeImpact.includes('(type)'),
+      typeImpact,
+    );
+
+    const noImpact = textOf(
+      await mcp.request('tools/call', { name: 'ichor_impact', arguments: { symbol: 'noSuchSymbol' } }),
+    );
+    check(
+      'ichor_impact is explicit about a symbol it does not know',
+      noImpact.includes('not in the compiled graph'),
+      noImpact,
+    );
 
     const granted = textOf(
       await mcp.request('tools/call', {

@@ -19,6 +19,20 @@ export interface SourceLocation {
 export interface FunctionFact extends SourceLocation {
   /** Stable key: `function:<file>#<name>` */
   key: string;
+  /**
+   * Human-readable strings written inside this function.
+   *
+   * Not structure, and never used to draw an edge — this is ANCHOR evidence, the
+   * step that is already text matching. Without it a task named entirely by
+   * user-facing copy has nothing to point at: *"the expired-link message says
+   * 'Link has expired' — make it friendlier"* landed 393 functions away from the
+   * two files that hold that string, because Ichor indexed declarations, calls and
+   * types and not a word of what the code actually says.
+   *
+   * Bounded per function — see `USER_TEXT_PER_FUNCTION` in analyze.ts. A codebase's
+   * strings are far bigger than its structure.
+   */
+  text?: string[];
   name: string;
   exported: boolean;
   /** True for React components — capitalised and returning JSX. */
@@ -83,6 +97,15 @@ export interface ModelFact {
   /** Stable key: `model:<name>` */
   key: string;
   name: string;
+  /**
+   * The schema file that declares it, repo-relative.
+   *
+   * Recorded so that editing `prisma/schema/link.prisma` can be understood as
+   * changing the models in it. Without this the schema was a file Ichor knew
+   * nothing about, and every schema edit was challenged — even one adding the
+   * field the task was about.
+   */
+  file: string;
 }
 
 export interface FieldFact {

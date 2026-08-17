@@ -20,8 +20,18 @@ import type { GraphClient } from '../graph/client.js';
 import { gInt } from '../graph/client.js';
 import type { Neighborhood } from './neighborhood.js';
 import type { PendingFacts } from './pending.js';
+import { namedTokens } from './named.js';
 
-export type Decision = 'EXPECTED' | 'CONNECTED' | 'SUSPICIOUS' | 'HUMAN_REVIEW';
+/**
+ * `NOT_JUDGED` is not a softer `CONNECTED`. It means Ichor has no standing here.
+ *
+ * A verdict is a claim about structure, and Ichor only has structure for code it
+ * parsed. Calling a `.json` file CONNECTED would assert a connection it never
+ * found; calling it SUSPICIOUS asserts scope expansion from no evidence at all —
+ * which is what it used to do, challenging `locales/en/viewer.json` during a task
+ * about changing exactly that message.
+ */
+export type Decision = 'EXPECTED' | 'CONNECTED' | 'NOT_JUDGED' | 'SUSPICIOUS' | 'HUMAN_REVIEW';
 
 export interface Evidence {
   kind: 'path' | 'member' | 'model' | 'existing-flow' | 'note';
@@ -39,12 +49,36 @@ export interface Verdict {
   needsJudge: boolean;
 }
 
+/**
+ * Will this verdict actually interrupt the agent?
+ *
+ * One owner for the question, because three places were answering it differently.
+ * The hook and the MCP tool both stopped on `SUSPICIOUS` or `HUMAN_REVIEW`, while
+ * the false-alarm harness counted `needsJudge` — which the no-content
+ * `HUMAN_REVIEW` branch sets to false. So the harness reported **0% false alarms**
+ * on 86 real edits while 73 of them would have interrupted a real session.
+ *
+ * A measurement that disagrees with the thing it measures is worse than no
+ * measurement: it reads as evidence.
+ */
+export function isChallenge(verdict: Pick<Verdict, 'decision'>): boolean {
+  return verdict.decision === 'SUSPICIOUS' || verdict.decision === 'HUMAN_REVIEW';
+}
+
 export interface ChangeIntent {
   operation: 'edit' | 'create' | 'delete';
   /** Repo-relative, POSIX. */
   file: string;
   /** Proposed content, when the host provides it. */
   content?: string;
+  /**
+   * The exact substitution an edit will make, when the host reports one.
+   *
+   * Lets the caller reconstruct the WHOLE proposed file — the version on disk at
+   * PreToolUse is still the old one — rather than parsing `new_string` as if a
+   * fragment were a module.
+   */
+  replace?: { from: string; to: string };
 }
 
 /**
@@ -76,6 +110,17 @@ export interface ClassifyDeps {
   /** Parsed pending content, when the operation carries content. */
   pending?: PendingFacts;
   /**
+   * True only when `pending` was parsed from the COMPLETE proposed file.
+   *
+   * Defaults to false, because the safe reading of a fragment is "I do not know
+   * what this file will contain". An `Edit` payload carries `new_string` alone, and
+   * treating that as the whole module makes every name outside the fragment look
+   * deleted — which challenged a perfectly ordinary edit to `createVendor` for
+   * "no longer exporting" the two functions the fragment did not happen to mention.
+   * Caught by the hook suite the moment the surface check was added.
+   */
+  wholeFile?: boolean;
+  /**
    * Files that were challenged and then written anyway, without ever being
    * justified.
    *
@@ -90,6 +135,37 @@ export interface ClassifyDeps {
 export async function classify(intent: ChangeIntent, deps: ClassifyDeps): Promise<Verdict> {
   const { neighborhood } = deps;
   const evidence: Evidence[] = [];
+
+  // ---- a Prisma schema ----------------------------------------------------
+  //
+  // Judged by the MODELS it declares, not by functions, because it declares none.
+  // Every branch below asks about reachability between functions and would find
+  // nothing here — which used to mean every schema edit was challenged, including
+  // one adding the field the task was about.
+  if (/\.prisma$/.test(intent.file)) {
+    const schema = await prismaSchemaEdit(intent.file, deps);
+    if (schema) return schema;
+  }
+
+  // ---- a file Ichor never read -------------------------------------------
+  //
+  // Checked first, because every branch below reasons about declarations, calls
+  // and reachability — and none of those exist for a file the analyser does not
+  // parse. Reaching the end of this function with a `.json` path returned
+  // SUSPICIOUS on the strength of finding nothing, which is not evidence.
+  if (!isAnalysed(intent.file)) {
+    const unread = await unreadableFile(intent, deps);
+    if (unread) return unread;
+  }
+
+  // ---- the file's public surface is shrinking ------------------------------
+  //
+  // Ahead of every reachability branch, because those answer "is this file near
+  // the task" and this asks a different question: does the edit break code that
+  // is not in the task at all. `lib/utils.ts` was CONNECTED — correctly, it is one
+  // hop away — and gutting it of a helper used in 232 places passed in silence.
+  const surface = await shrinkingSurface(intent, deps);
+  if (surface) return surface;
 
   const membersInFile = [...neighborhood.members.values()].filter((m) => m.file === intent.file);
 
@@ -259,6 +335,274 @@ export async function classify(intent: ChangeIntent, deps: ClassifyDeps): Promis
 // ---------------------------------------------------------------- internals
 
 /**
+ * Does the analyser actually read this file type?
+ *
+ * The honest list, kept next to the thing that decides it. `.prisma` is here
+ * because the schema parser reads it and its models become real nodes; a `.json`
+ * dictionary or a stylesheet is not, however much a task might be about one.
+ */
+function isAnalysed(file: string): boolean {
+  if (/\.d\.ts$/.test(file)) return false;
+  return /\.(ts|tsx|prisma)$/.test(file);
+}
+
+/**
+ * Is this edit removing something other code depends on?
+ *
+ * THE DISTINCTION THAT MATTERS
+ *
+ * Not which file was touched — whether the change alters what OTHER code is
+ * entitled to rely on. Rewriting a function's insides is ordinary work. Removing
+ * one that 232 places import is a different act, and during a task about message
+ * wording it is scope expansion however near the file happens to sit.
+ *
+ * The case this exists for: mid-task, an agent pulled `cn` out of `lib/utils.ts`
+ * into a new file. The new file was caught. Gutting the shared one returned
+ * CONNECTED and said nothing.
+ *
+ * FOUR CONDITIONS, ALL REQUIRED
+ *
+ *   1  the proposed file was reconstructed and parsed — no guessing from a fragment
+ *   2  a name the graph records as exported is GONE from it
+ *   3  the task never named this file
+ *   4  the graph shows real dependents, and the count is quoted
+ *
+ * Condition 3 is what keeps this quiet during honest refactoring: a developer who
+ * says "refactor lib/utils.ts" gets no argument about refactoring lib/utils.ts.
+ */
+async function shrinkingSurface(
+  intent: ChangeIntent,
+  deps: ClassifyDeps,
+): Promise<Verdict | undefined> {
+  const pending = deps.pending;
+  if (!pending || pending.parseError || intent.operation !== 'edit') return undefined;
+  // Without the complete file, "this name is gone" cannot be told apart from
+  // "this name is not in the part I was shown".
+  if (!deps.wholeFile) return undefined;
+  // A partly-applied edit is often unbalanced, and a recovered parse stops at the
+  // break — so everything after it reads as removed. See PendingFacts.syntaxErrors.
+  if (pending.syntaxErrors > 0) return undefined;
+  if (!isAnalysed(intent.file) || pending.isTest) return undefined;
+
+  const fileId = await fileNodeId(intent.file, deps);
+  if (fileId === undefined) return undefined;
+
+  // What the graph says this file exports today.
+  const rows = await deps.client.run(
+    `MATCH (f:File {id: $id})-[:DECLARES]->(fn:Function {exported: true}) RETURN fn.name AS name`,
+    { id: gInt(fileId) },
+  );
+  const before = rows.records.map((r) => String(r.get('name')));
+  if (before.length === 0) return undefined;
+
+  /**
+   * Only top-level names are compared.
+   *
+   * The graph records a method as `VendorForm.handleSubmit`, and the parser
+   * reports the exported `VendorForm`. Treating the method as a lost export would
+   * challenge every component edit.
+   */
+  const after = new Set(pending.exportedNames);
+  const removed = before.filter((name) => !name.includes('.') && !after.has(name));
+  if (removed.length === 0) return undefined;
+
+  // The developer named this file, so its shape is theirs to change.
+  if (taskNamed(intent.file, deps.neighborhood.task)) return undefined;
+
+  const dependents = await dependentsOf(removed, deps);
+  if (dependents.total === 0) return undefined;
+
+  const list = removed.slice(0, 3).join(', ');
+  return {
+    decision: 'SUSPICIOUS',
+    reason:
+      `${intent.file} stops exporting ${list}, and ${dependents.total} place` +
+      `${dependents.total === 1 ? '' : 's'} in the codebase call ` +
+      `${removed.length === 1 ? 'it' : 'them'}. The task never named this file.`,
+    evidence: [
+      { kind: 'note', text: `no longer exported: ${removed.join(', ')}` },
+      { kind: 'path', text: `called from ${dependents.examples.join(', ')}` },
+    ],
+    question:
+      `"${deps.neighborhood.task}" does not mention ${intent.file}. ` +
+      `Removing ${list} changes what ${dependents.total} other place` +
+      `${dependents.total === 1 ? '' : 's'} depend on — is that part of this task?`,
+    needsJudge: true,
+  };
+}
+
+/** Did the task text name this file outright? */
+function taskNamed(file: string, task: string): boolean {
+  const lower = file.toLowerCase();
+  const base = lower.slice(lower.lastIndexOf('/') + 1);
+  // Reuses the prompt reader, so "which files did the developer name" has one
+  // answer across the codebase rather than two that drift.
+  return namedTokens(task).paths.some((p) => lower.endsWith(p) || p === base);
+}
+
+/**
+ * How many places call these names, and a few of them by file.
+ *
+ * The count is the whole argument — "232 places import this" is what makes the
+ * difference between a refactor and a hazard legible — so it is never estimated.
+ */
+async function dependentsOf(
+  names: string[],
+  deps: ClassifyDeps,
+): Promise<{ total: number; examples: string[] }> {
+  const files = new Set<string>();
+  let total = 0;
+
+  for (const name of names.slice(0, 4)) {
+    const rows = await deps.client.run(
+      `MATCH (caller:Function {repo: $repo})-[:CALLS]->(target:Function {repo: $repo, name: $name})
+         RETURN caller.file AS file`,
+      { repo: deps.repo, name },
+    );
+    total += rows.records.length;
+    for (const record of rows.records.slice(0, 40)) files.add(String(record.get('file')));
+  }
+
+  return { total, examples: [...files].slice(0, 3) };
+}
+
+/**
+ * A verdict for an edit to a Prisma schema.
+ *
+ * The schema is where the data the task works on is actually declared, so the
+ * question is simply whether those models are the task's. `coreModels` is the
+ * boundary's own answer to "what data is this task about", already computed and
+ * already what the rest of the classifier uses.
+ *
+ * Returns undefined if the schema is not in the graph — a schema file added in
+ * this very turn, most likely — so the caller falls through to the general
+ * unreadable-file path rather than asserting anything.
+ */
+async function prismaSchemaEdit(
+  file: string,
+  deps: ClassifyDeps,
+): Promise<Verdict | undefined> {
+  const fileId = await fileNodeId(file, deps);
+  if (fileId === undefined) return undefined;
+
+  const rows = await deps.client.run(
+    `MATCH (f:File {id: $id})-[:DECLARES]->(m:Model) RETURN m.name AS name`,
+    { id: gInt(fileId) },
+  );
+  const declared = rows.records.map((r) => String(r.get('name')));
+  if (declared.length === 0) return undefined;
+
+  const core = declared.filter((name) => deps.neighborhood.coreModels.has(name));
+  if (core.length > 0) {
+    return {
+      decision: 'EXPECTED',
+      reason: `${file} declares ${core.join(', ')}, which is the data this task is about.`,
+      evidence: [{ kind: 'model', text: `declares ${core.join(', ')}` }],
+      needsJudge: false,
+    };
+  }
+
+  // Declares models, none of them the task's. Worth saying — a schema change is
+  // a change to shared shape — but Ichor has not read a line of the diff, so it
+  // reports rather than challenges.
+  return {
+    decision: 'NOT_JUDGED',
+    reason:
+      `${file} declares ${declared.slice(0, 4).join(', ')}, and this task is about ` +
+      `${[...deps.neighborhood.coreModels].slice(0, 3).join(', ') || 'no particular model'}.`,
+    evidence: [
+      { kind: 'model', text: `declares ${declared.slice(0, 6).join(', ')}` },
+      { kind: 'note', text: 'a schema edit is reported, not challenged — Ichor does not read the diff' },
+    ],
+    needsJudge: false,
+  };
+}
+
+/**
+ * A verdict for a file Ichor has not parsed.
+ *
+ * THREE STEPS, IN ORDER, and the last one is the important one.
+ *
+ *   1  Is it in the graph anyway? A `.prisma` schema is, and so is any asset a
+ *      TypeScript file imports. Then the normal logic applies and this returns
+ *      undefined to let it run.
+ *   2  Does its PATH match what the task is about? `locales/en/viewer.json` in a
+ *      task about the viewer's expired-link message is not a coincidence, and the
+ *      same scorer that draws the boundary can say so.
+ *   3  Otherwise say nothing. NOT a challenge.
+ *
+ * Step 3 is the fix for the worst false-alarm class Ichor had. Every JSON, CSS,
+ * Markdown and config edit was SUSPICIOUS, because everything absent from the
+ * graph was — including `locales/en/viewer.json` during a task about changing
+ * exactly that message. Ichor had not read the file, could not have read it, and
+ * challenged it for scope expansion regardless (rule: never assert more than the
+ * evidence supports).
+ */
+async function unreadableFile(
+  intent: ChangeIntent,
+  deps: ClassifyDeps,
+): Promise<Verdict | undefined> {
+  // In the graph despite not being parsed — a Prisma schema, or an imported
+  // asset. There is real structure to reason about, so fall through.
+  if ((await fileNodeId(intent.file, deps)) !== undefined) return undefined;
+
+  const matched = pathMatchesTask(intent.file, deps.neighborhood);
+  if (matched.length > 0) {
+    return {
+      decision: 'CONNECTED',
+      reason:
+        `${intent.file} is not code Ichor reads, but its path matches the task ` +
+        `(${matched.join(', ')}).`,
+      evidence: [{ kind: 'note', text: `path matches: ${matched.join(', ')}` }],
+      needsJudge: false,
+    };
+  }
+
+  return {
+    decision: 'NOT_JUDGED',
+    reason: `${intent.file} is not a file Ichor reads, so it has no view on this change.`,
+    evidence: [
+      { kind: 'note', text: 'not TypeScript or a Prisma schema — nothing in the graph describes it' },
+    ],
+    needsJudge: false,
+  };
+}
+
+/**
+ * Words shared between a file's path and the task's own terms.
+ *
+ * Deliberately the task's TERMS rather than raw prompt words: those are already
+ * split, stemmed and stop-worded by the anchor scorer, so "viewers" in the prompt
+ * matches `viewer.json` on disk. Segments shorter than four characters are
+ * skipped — `en`, `api` and `lib` appear in half the paths in any repository and
+ * would make this match everything.
+ */
+function pathMatchesTask(file: string, neighborhood: Neighborhood): string[] {
+  const segments = new Set(
+    file
+      .toLowerCase()
+      .split(/[\/\\._-]+/)
+      .filter((s) => s.length >= 4),
+  );
+  if (segments.size === 0) return [];
+
+  const hits: string[] = [];
+  for (const term of neighborhood.terms ?? []) {
+    const t = term.toLowerCase();
+    if (t.length < 4) continue;
+    for (const segment of segments) {
+      // Either direction: "expiration" in the path matches the term "expire",
+      // and "viewer" matches "viewers".
+      if (segment === t || segment.startsWith(t) || t.startsWith(segment)) {
+        hits.push(term);
+        break;
+      }
+    }
+  }
+  return [...new Set(hits)].slice(0, 4);
+}
+
+/**
  * A file that exists in the codebase but sits entirely outside the task.
  *
  * Returns undefined when the file is not in the graph at all, so the caller can
@@ -268,16 +612,16 @@ async function existingFileOutsideTask(
   file: string,
   deps: ClassifyDeps,
 ): Promise<Verdict | undefined> {
-  const rows = await deps.client.run(
-    `MATCH (f:File {repo: $repo})-[:DECLARES]->(fn:Function)
-       WHERE f.path = $path
-       RETURN fn.id AS id, fn.name AS name`,
-    { path: file, repo: deps.repo },
-  );
-  if (rows.records.length === 0) return undefined; // not in the graph — a new file
+  // Two steps — see fileNodeId. The single-query form cost 30 seconds for a file
+  // that is not in the graph, which is every new file an agent writes.
+  const fileId = await fileNodeId(file, deps);
+  if (fileId === undefined) return undefined; // not in the graph — a new file
 
-  const functionIds = rows.records.map((r) => Number(r.get('id')));
-  const names = rows.records.map((r) => String(r.get('name')));
+  const declared = await declaredIn(fileId, deps);
+  if (declared.length === 0) return undefined;
+
+  const functionIds = declared.map((d) => d.id);
+  const names = declared.map((d) => d.name);
 
   /**
    * Give an existing file the same hearing a new one gets.
@@ -327,15 +671,44 @@ async function existingFileOutsideTask(
   };
 }
 
-/** Graph ids of every function a file declares. */
-async function functionsDeclaredIn(file: string, deps: ClassifyDeps): Promise<number[]> {
+/**
+ * The functions a file declares — found in two steps, deliberately.
+ *
+ * `MATCH (f:File {repo})-[:DECLARES]->(fn:Function) WHERE f.path = $path`
+ * expands EVERY file's declarations before filtering by path. Measured on a
+ * 1,362-file repo: 10 seconds for a file that exists, and **30 seconds — the
+ * engine's query limit — for one that does not**, which is every new file an
+ * agent creates. With retries that became 158 seconds and the hook was killed.
+ *
+ * Matching the File node by itself is fast in both cases (19ms found, 124ms
+ * missing), so ask that first and only expand once there is something to expand
+ * from. Same answer, roughly a hundred times faster.
+ */
+async function fileNodeId(file: string, deps: ClassifyDeps): Promise<number | undefined> {
   const rows = await deps.client.run(
-    `MATCH (f:File {repo: $repo})-[:DECLARES]->(fn:Function)
-       WHERE f.path = $path
-       RETURN fn.id AS id`,
+    `MATCH (f:File {repo: $repo, path: $path}) RETURN f.id AS id LIMIT 1`,
     { path: file, repo: deps.repo },
   );
-  return rows.records.map((r) => Number(r.get('id')));
+  return rows.records.length ? Number(rows.records[0].get('id')) : undefined;
+}
+
+async function declaredIn(
+  fileId: number,
+  deps: ClassifyDeps,
+): Promise<{ id: number; name: string }[]> {
+  const rows = await deps.client.run(
+    `MATCH (f:File {id: $id})-[:DECLARES]->(fn:Function)
+       RETURN fn.id AS id, fn.name AS name`,
+    { id: gInt(fileId) },
+  );
+  return rows.records.map((r) => ({ id: Number(r.get('id')), name: String(r.get('name')) }));
+}
+
+/** Graph ids of every function a file declares. */
+async function functionsDeclaredIn(file: string, deps: ClassifyDeps): Promise<number[]> {
+  const fileId = await fileNodeId(file, deps);
+  if (fileId === undefined) return [];
+  return (await declaredIn(fileId, deps)).map((f) => f.id);
 }
 
 /**

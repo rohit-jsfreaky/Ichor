@@ -18,10 +18,12 @@
 
 import * as readline from 'node:readline';
 import { GraphClient, configFromEnv } from '../graph/client.js';
-import { callersOf, functionsTouching, pathsToModel } from '../graph/queries.js';
-import { repoIdFor } from '../ids.js';
+import { callersOf, functionsTouching, impactOf, pathsToModel } from '../graph/queries.js';
+import { loadFacts } from '../refresh/refresh.js';
+import { findAnchors } from '../scope/anchors.js';
+import { repoIdFor, IdRegistry } from '../ids.js';
 import { loadTask, toNeighborhood, markJustified, type PersistedTask } from '../state.js';
-import { classify } from '../scope/classify.js';
+import { classify, isChallenge } from '../scope/classify.js';
 import { parsePending } from '../scope/pending.js';
 import { askJudge, formatOpinion } from '../judge/judge.js';
 import { checkBudget, recordJudgeCall } from '../judge/budget.js';
@@ -119,6 +121,36 @@ const TOOLS: ToolDefinition[] = [
     inputSchema: {
       type: 'object',
       properties: { symbol: { type: 'string', description: 'exact function name' } },
+      required: ['symbol'],
+    },
+  },
+  {
+    name: 'ichor_find',
+    description:
+      'Where does something live in this codebase? Describe it in plain words — "the place ' +
+      'invites are created", "duplicate email handling" — and get the functions, types, routes ' +
+      'and tables that match, ranked, with file paths. Use this INSTEAD of grepping for a guessed ' +
+      'name: it searches the compiled structure rather than text, so it finds code whose name you ' +
+      'could not have guessed and skips matches in comments and strings.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'plain description of what you are looking for' },
+        limit: { type: 'number', description: 'how many results (default 15)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'ichor_impact',
+    description:
+      'What else is affected if I change this? Returns who calls it, which HTTP endpoints end up ' +
+      'running it, which database tables are at stake, and — for a type — which functions depend ' +
+      'on its shape. Use this BEFORE editing or deleting anything whose blast radius you are not ' +
+      'certain of.',
+    inputSchema: {
+      type: 'object',
+      properties: { symbol: { type: 'string', description: 'exact function or type name' } },
       required: ['symbol'],
     },
   },
@@ -230,7 +262,117 @@ export async function runMcpServer(repoRoot: string): Promise<void> {
   }
 }
 
+/**
+ * How long a retrieval tool may take before the agent is told to use its own search.
+ *
+ * WHY THIS EXISTS
+ *
+ * A tool that FAILS is recovered from instantly — the agent shrugs and greps. A tool
+ * that is merely SLOW blocks, and there is no signal to fall back on. One real session
+ * spent about 38 seconds inside a single `ichor_impact` call before answering, and the
+ * developer's reaction was the correct one: this cannot be the cost of asking.
+ *
+ * That 38 seconds was never explained. Two candidate causes were measured and both
+ * disproved — database size (4,019 Function nodes across 10 projects answers the same
+ * query in 575ms) and contention with a background rebuild (589ms idle versus 572ms
+ * mid-rebuild). Its normal cost is 150–600ms.
+ *
+ * So this is deliberately NOT a fix for a known cause. It is a bound, which is the
+ * right shape of answer when the cause is unknown: whatever that was, it can no longer
+ * cost an agent more than a second and a half, because at that point Ichor stops
+ * answering and says so. An unbounded unknown becomes a bounded, honest failure.
+ *
+ * Only the retrieval tools get a budget. The scope tools read local JSON and cannot be
+ * slow, and `ichor_request_scope_expansion` deliberately waits on the Judge.
+ */
+function retrievalBudgetMs(): number {
+  // Overridable so the MCP suite can force the fallback deterministically, and so a
+  // slow machine or a very large graph can be given more rope without a rebuild.
+  const raw = Number(process.env.ICHOR_RETRIEVAL_BUDGET_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 1_500;
+}
+
+const NEEDS_BUDGET = new Set(['ichor_find', 'ichor_impact', 'ichor_callers', 'ichor_paths']);
+
+/**
+ * Answer, or hand the question back — never make the agent wait.
+ *
+ * The pending query is not cancelled, because Bolt gives no way to cancel one. It is
+ * abandoned: it finishes into nothing while the agent gets on with its own search. That
+ * wastes a little database work and costs the agent no time, which is the right trade
+ * for a tool whose entire value proposition is being faster than a grep.
+ */
+async function withinBudget(name: string, work: Promise<string>): Promise<string> {
+  const budget = retrievalBudgetMs();
+  let timer: NodeJS.Timeout | undefined;
+  const giveUp = new Promise<string>((resolve) => {
+    timer = setTimeout(
+      () =>
+        resolve(
+          `${name} did not answer within ${budget}ms, so it has nothing for you ` +
+            'on this one. Use your own search tools instead — Grep and reading files will ' +
+            'answer this, and waiting on Ichor here would cost you more than it saves. ' +
+            'Nothing is wrong with the code you are asking about; only this lookup was slow.',
+        ),
+      budget,
+    );
+    timer.unref?.();
+  });
+
+  const started = Date.now();
+  try {
+    return await Promise.race([work, giveUp]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    const ms = Date.now() - started;
+    // Recorded on every call, not only slow ones, so an unexplained 38 seconds is
+    // diagnosable the next time it happens instead of being lost.
+    if (ms > budget / 3) {
+      process.stderr.write(`[ichor mcp] ${name} took ${ms}ms
+`);
+    }
+  }
+}
+
+/**
+ * Where a named function lives, answered from disk rather than from the database.
+ *
+ * The graph is queried by node id everywhere else, and an id lookup costs the same
+ * however much else is loaded. Finding the STARTING node was the exception: it matched
+ * on name and repo, and with no property index that is a scan of every Function node in
+ * the database — including every other project's.
+ *
+ * `facts.json` already holds every function with its key, and ids are derived from keys
+ * deterministically, so the starting id is computable locally. Measured at 7ms against
+ * 32ms for the scan, and unlike the scan it does not get slower as the database fills.
+ *
+ * Returns undefined when there are no cached facts, in which case the query falls back
+ * to the scan rather than pretending the symbol does not exist.
+ */
+function seedIdsFor(repoRoot: string, symbol: string): number[] | undefined {
+  const facts = loadFacts(repoRoot);
+  if (!facts) return undefined;
+  const ids = new IdRegistry();
+  const matched = facts.functions.filter((fn) => fn.name === symbol).map((fn) => ids.idFor(fn.key));
+  // No match locally is not proof of absence — the facts may be a rebuild behind — so
+  // this hands back to the scan rather than asserting nothing is there.
+  return matched.length > 0 ? matched : undefined;
+}
+
 async function callTool(
+  name: string,
+  args: Record<string, unknown>,
+  repoRoot: string,
+  requireTask: () => PersistedTask,
+  getGraph: () => GraphClient,
+): Promise<string> {
+  if (NEEDS_BUDGET.has(name)) {
+    return withinBudget(name, runTool(name, args, repoRoot, requireTask, getGraph));
+  }
+  return runTool(name, args, repoRoot, requireTask, getGraph);
+}
+
+async function runTool(
   name: string,
   args: Record<string, unknown>,
   repoRoot: string,
@@ -297,7 +439,7 @@ async function callTool(
           for (const e of verdict.evidence) lines.push(`  · ${e.text}`);
         }
         if (verdict.question) lines.push('', verdict.question);
-        if (verdict.decision === 'SUSPICIOUS' || verdict.decision === 'HUMAN_REVIEW') {
+        if (isChallenge(verdict)) {
           lines.push(
             '',
             'If this is genuinely required, call ichor_request_scope_expansion with your reason.',
@@ -412,7 +554,13 @@ async function callTool(
       const symbol = String(args.symbol ?? '').trim();
       if (!symbol) throw new Error('symbol is required');
 
-      const result = await callersOf(getGraph(), symbol, repoIdFor(repoRoot));
+      const result = await callersOf(
+        getGraph(),
+        symbol,
+        repoIdFor(repoRoot),
+        undefined,
+        seedIdsFor(repoRoot, symbol),
+      );
       if (result.callers.length === 0 && result.routes.length === 0) {
         return (
           `Nothing in the compiled graph calls ${symbol}.\n` +
@@ -434,6 +582,142 @@ async function callTool(
       if (result.truncated) {
         lines.push(`⚠ truncated at ${result.limit} — there are more.`);
       }
+      return lines.join('\n');
+    }
+
+    case 'ichor_find': {
+      const query = String(args.query ?? '').trim();
+      if (!query) throw new Error('query is required');
+      const limit = typeof args.limit === 'number' ? args.limit : 15;
+
+      // The same scorer that draws a task boundary. Asking "where does this
+      // live?" and "what does this task cover?" are the same question, so they
+      // must not drift apart into two answers (ENGINEERING-RULES rule 3).
+      // A cache written by an older Ichor can be missing whole fields. Crashing
+      // on it would strand anyone who upgrades mid-task, so check the shape and
+      // say what to do rather than throwing (rule 2).
+      const facts = loadFacts(repoRoot);
+      if (!facts || !Array.isArray(facts.functions) || !Array.isArray(facts.types)) {
+        return (
+          'No usable graph for this repo yet — the cache is missing or was written by an older ' +
+          'version of Ichor. Run `ichor watch` here to rebuild it.'
+        );
+      }
+
+      /**
+       * Damping ON here, and OFF when drawing a boundary. Same scorer, opposite
+       * setting, because the two jobs want opposite things.
+       *
+       * A boundary must not MISS the task's code, and damping the commonest word
+       * in a domain suppressed the very thing half its tasks are about — measured,
+       * it cost 19 points of false alarms. A search must not BURY the answer, and
+       * without damping a query for expiry enforcement on a real repo returned
+       * `Check`, `BadgeCheck`, `CheckCircle2` and `LinkedIn` — icons, because
+       * "check" and "link" are everywhere. With it: `ExpirationSection`,
+       * `CleanUrlOnExpire`, `cleanupExpiredJobs`.
+       */
+      const { anchors, terms } = findAnchors(facts, query, { limit, rarityWeighting: true });
+      if (anchors.length === 0) {
+        return (
+          `Nothing in the compiled graph matches "${query}".\n` +
+          `Terms tried: ${terms.join(', ') || '(none usable)'}.`
+        );
+      }
+
+      /**
+       * Keep the best of each KIND, not just the best overall.
+       *
+       * A codebase has far more functions than tables, so a straight top-N is all
+       * functions — on a real repo, a search for link expiry ranked
+       * `Link.expiresAt` thirtieth, behind twenty UI components, and the default
+       * limit never showed it. The table is often the best answer to "where is
+       * this enforced?", because the next question is which endpoints reach it.
+       *
+       * Done here rather than in the scorer: the scorer's weights were measured
+       * against 30 real commits for drawing boundaries, and re-tuning them to
+       * flatter a search would trade a measured result for an unmeasured one.
+       */
+      const byKind = new Map<string, typeof anchors>();
+      for (const a of anchors) {
+        const list = byKind.get(a.kind) ?? [];
+        list.push(a);
+        byKind.set(a.kind, list);
+      }
+
+      const shown: typeof anchors = [];
+      const seen = new Set<string>();
+      // Everything that is not a function first — they are rarer and more decisive.
+      for (const [kind, list] of byKind) {
+        if (kind === 'function') continue;
+        for (const a of list.slice(0, 4)) {
+          shown.push(a);
+          seen.add(a.key);
+        }
+      }
+      for (const a of anchors) {
+        if (shown.length >= limit) break;
+        if (!seen.has(a.key)) shown.push(a);
+      }
+
+      const lines = [`Best matches for "${query}":`, ''];
+      for (const a of shown) {
+        const where = a.file ? `  ${a.file}` : '';
+        lines.push(`  ${a.kind.padEnd(9)} ${a.name.padEnd(34)}${where}`);
+        lines.push(`  ${' '.repeat(9)} ${a.why}`);
+      }
+      lines.push(
+        '',
+        'Ranked by how specifically each one matches, not by text frequency.',
+        'A table or route here is often the better lead: follow it with ichor_paths.',
+        'Logic written inline inside a handler has no name of its own — search finds',
+        'the handler and the table it touches, not the `if` statement.',
+      );
+      return lines.join('\n');
+    }
+
+    case 'ichor_impact': {
+      const symbol = String(args.symbol ?? '').trim();
+      if (!symbol) throw new Error('symbol is required');
+
+      const impact = await impactOf(
+        getGraph(),
+        symbol,
+        repoIdFor(repoRoot),
+        undefined,
+        seedIdsFor(repoRoot, symbol),
+      );
+      if (impact.kind === 'unknown') {
+        return `${symbol} is not in the compiled graph. Check the spelling, or it may be declared in a file Ichor does not analyse.`;
+      }
+
+      const lines = [`Changing ${symbol} (${impact.kind}) affects:`, ''];
+      lines.push(`  declared in   ${impact.declaredIn.join(', ')}`);
+
+      if (impact.callers.length) {
+        lines.push('', `  called by ${impact.callers.length}:`);
+        for (const c of impact.callers) {
+          lines.push(`    ${c.via === 'direct' ? '→' : '⇢'} ${c.name.padEnd(24)} ${c.file}`);
+        }
+      } else {
+        lines.push('', '  called by      nothing in the graph — an entry point, or called dynamically');
+      }
+
+      if (impact.referencedBy.length) {
+        lines.push('', `  shape depended on by ${impact.referencedBy.length}:`);
+        for (const r of impact.referencedBy) lines.push(`    ${r.name.padEnd(24)} ${r.file}`);
+      }
+
+      if (impact.routes.length) {
+        lines.push('', '  reachable from these endpoints:');
+        for (const r of impact.routes) lines.push(`    ${r.method} ${r.path}`);
+      }
+
+      if (impact.models.length) {
+        lines.push('', `  data at stake: ${impact.models.join(', ')}`);
+      }
+
+      lines.push('', '→ direct call, ⇢ through a chain. Static analysis is a floor, never a ceiling.');
+      if (impact.truncated) lines.push(`⚠ truncated at ${impact.limit} — there are more.`);
       return lines.join('\n');
     }
 

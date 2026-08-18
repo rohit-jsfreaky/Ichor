@@ -41,6 +41,30 @@ const STOP_WORDS = new Set([
   'has', 'have', 'had', 'whether', 'where', 'what', 'which', 'who', 'why', 'how',
   'our', 'your', 'their', 'them', 'they', 'some', 'any', 'all', 'each', 'into',
   'out', 'own', 'via', 'per', 'about', 'after', 'before', 'still', 'only', 'ever',
+
+  // Conversational filler. A prompt typed to a coding agent is a message to a
+  // person, not a query -- "hey claude do one thing pleaes add the retry logic in
+  // the api client" spends six words on greeting before it names any code.
+  //
+  // These matter more than they look, for the same reason as the group above:
+  // matching is by substring, so a three-letter filler reaches inside real
+  // identifiers. Measured on a real repository, `one` -- from "do one thing" --
+  // anchored the boundary to Milestone, ScreenshotDropzone and onEscape, and
+  // `two` reaches inside netWOrk the same way. Those anchors pulled 185 functions,
+  // a third of the repo, into scope, and a boundary that wide cannot challenge
+  // anything.
+  //
+  // This is a fixed list where the note below argues for counting, and the
+  // difference is deliberate: a task verb like "delete" discriminates in one
+  // codebase and not another, so it has to be measured per repo. "hey" and
+  // "thing" name no code in any codebase. Words shorter than three characters
+  // are already dropped by the length floor in taskTerms, so none are listed.
+  'hey', 'hello', 'okay', 'yeah', 'yep', 'nope', 'thanks', 'thank', 'pls', 'plz',
+  'bro', 'dude', 'man', 'guys', 'one', 'two', 'three', 'thing', 'things',
+  'something', 'anything', 'everything', 'stuff', 'lets', 'gonna', 'wanna', 'kinda',
+  'really', 'very', 'actually', 'basically', 'literally', 'simply', 'maybe',
+  'perhaps', 'quite', 'pretty', 'good', 'nice', 'great', 'now', 'way', 'ways',
+  'sure', 'bit',
 ]);
 
 // Task verbs — "fix", "add", "delete", "update" — are deliberately NOT listed.

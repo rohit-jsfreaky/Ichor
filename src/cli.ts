@@ -16,6 +16,7 @@
 import { Command } from 'commander';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { GraphClient, configFromEnv } from './graph/client.js';
 import { explainFailure } from './errors.js';
@@ -37,12 +38,32 @@ import {
 import { installHooks } from './hook/install.js';
 import { up, down, isRunning } from './stack/stack.js';
 
+/**
+ * The version, read from package.json rather than written here twice.
+ *
+ * It was a literal, and it drifted: package.json said 0.1.1 while `ichor
+ * --version` said 0.1.0, so the one number a user can check to tell whether
+ * their install has a fix was reporting the version before it. Resolved
+ * relative to this file, which lands on the package root both from `dist/src/`
+ * in a checkout and from `node_modules/ichor-cli/dist/src/` once installed.
+ */
+function packageVersion(): string {
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(fs.readFileSync(path.resolve(here, '..', '..', 'package.json'), 'utf8'));
+    return typeof pkg.version === 'string' ? pkg.version : '0.0.0';
+  } catch {
+    // Never let a missing manifest stop the CLI from running.
+    return '0.0.0';
+  }
+}
+
 const program = new Command();
 
 program
   .name('ichor')
   .description('Make every scope expansion explicit while AI coding agents work.')
-  .version('0.1.0');
+  .version(packageVersion());
 
 program
   .command('init')

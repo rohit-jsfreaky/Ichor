@@ -134,17 +134,67 @@ const MAX_TASK_CHARS = 400;
  * dropped is the middle — the oldest widenings, which are the least likely to
  * still describe what is being worked on.
  */
-export function widenTask(existing: string, prompt: string): string {
-  const combined = `${existing} ${prompt}`.trim();
-  if (combined.length <= MAX_TASK_CHARS) return combined;
+/**
+ * How many prompts a task description may carry.
+ *
+ * The character cap alone did not hold, because it only engaged once the text was
+ * already long. Under 400 characters every prompt was kept verbatim, so a session
+ * that opened with "hey claude do one thing pleaes add the retry logic in the api
+ * client" carried that greeting into every boundary drawn for the next quarter of
+ * an hour.
+ *
+ * That is not cosmetic. Matching is by substring, so the filler word `one` reached
+ * inside Milestone, ScreenshotDropzone and onEscape, and those anchors pulled 185
+ * functions -- a third of the repository -- into scope. A boundary that wide
+ * cannot challenge anything, and Ichor went quiet without ever saying why.
+ *
+ * Counting prompts bounds the noise at its source: keep the one that NAMED the
+ * job, and what was said most recently.
+ */
+const MAX_TASK_PROMPTS = 3;
 
-  // Keep the first sentence of the original, then as much of the recent tail as
-  // fits. A boundary should reflect the job you named and what you have said
-  // lately, not everything you have ever said.
-  const opening = existing.slice(0, Math.min(existing.length, 160)).trim();
-  const room = MAX_TASK_CHARS - opening.length - 2;
-  const tail = prompt.length > room ? prompt.slice(prompt.length - room) : prompt;
-  return `${opening} ${tail}`.trim();
+/**
+ * Separator between the prompts that make up a task.
+ *
+ * Chosen because `taskTerms` strips it: anything outside [word, space, slash,
+ * dash] becomes a space before terms are extracted, so the separator can never
+ * become a term of its own.
+ */
+const PROMPT_SEP = ' | ';
+
+export function widenTask(existing: string, prompt: string): string {
+  const said = existing.split(PROMPT_SEP).map((part) => part.trim()).filter(Boolean);
+  const kept = [...said, prompt.trim()].filter(Boolean);
+  if (!kept.length) return '';
+
+  /**
+   * Drop the MIDDLE -- never the opening, never the newest.
+   *
+   * The first prompt named the job and the last one says what is happening now.
+   * The widenings in between are the ones least likely to still describe the
+   * work, which is the same reasoning the character cap used, applied before the
+   * text has a chance to grow rather than after.
+   */
+  const window =
+    kept.length <= MAX_TASK_PROMPTS
+      ? [...kept]
+      : [kept[0]!, ...kept.slice(kept.length - (MAX_TASK_PROMPTS - 1))];
+
+  // Same rule for length: shed old widenings before touching either end.
+  while (window.length > 2 && window.join(PROMPT_SEP).length > MAX_TASK_CHARS) {
+    window.splice(1, 1);
+  }
+
+  const text = window.join(PROMPT_SEP);
+  if (text.length <= MAX_TASK_CHARS) return text;
+
+  // Down to two and still too long: keep all of the newest and as much of the
+  // opening as fits. The newest is the better description of what is happening.
+  const newest = window[window.length - 1]!;
+  if (newest.length >= MAX_TASK_CHARS) return newest.slice(0, MAX_TASK_CHARS).trim();
+  const room = MAX_TASK_CHARS - newest.length - PROMPT_SEP.length;
+  const opening = window[0]!.slice(0, Math.max(0, room)).trim();
+  return opening ? `${opening}${PROMPT_SEP}${newest}` : newest;
 }
 
 function boundaryOf(task: PersistedTask): BoundaryView {

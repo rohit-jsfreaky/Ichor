@@ -77,6 +77,36 @@ export function explainFailure(error: unknown): string[] {
     ];
   }
 
+  /**
+   * The graph answered too slowly and the server cut the query off.
+   *
+   * Nearly always one cause: several repositories share one database. HydraDB
+   * cannot index the `repo` property every node carries, so each extra project
+   * makes every query scan more, and three repos was enough to blow a 30s ceiling
+   * on a query that is normally milliseconds. Ichor runs ONE database per machine
+   * by design, so this is a foreseeable state, not a corruption — and it is
+   * cheap to get out of.
+   */
+  if (/query timeout|client_query_runtime exceeded|Transaction[.]Terminated|exceeded query timeout/i.test(text)) {
+    return [
+      '',
+      'The graph took too long to answer and the query was cut off.',
+      '',
+      '  This is almost always several repositories sharing one database. Ichor runs',
+      '  one database per machine, and the engine cannot index which repo a node',
+      '  belongs to — so every extra project makes every query slower.',
+      '',
+      '  Clear it and index just the repo you are working in:',
+      '',
+      '      ichor down --wipe',
+      '      ichor up',
+      '      ichor watch',
+      '',
+      '  `--wipe` discards the stored graph; the next run rebuilds it from your code.',
+      '',
+    ];
+  }
+
   if (e?.code === 'EACCES' || e?.code === 'EPERM') {
     return [
       '',

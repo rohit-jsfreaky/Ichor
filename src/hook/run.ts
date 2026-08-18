@@ -30,7 +30,7 @@ import {
   type OverlayFile,
 } from '../state.js';
 import { parseHookInput, isEditingTool, isShellTool, type HookPayload } from './input.js';
-import { emitContext, handlePrompt } from './prompt.js';
+import { agentOf, emitContext, handlePrompt } from './prompt.js';
 import { handleStop } from './stop.js';
 import { judgeBashChanges } from './bashGate.js';
 import { repoIdFor } from '../ids.js';
@@ -258,7 +258,7 @@ export async function runHook(): Promise<void> {
       debug('--- UserPromptSubmit');
       const outcome = await handlePrompt(payload, repoRoot);
       for (const line of outcome.log) debug(line);
-      emitContext(outcome.context);
+      emitContext(outcome.context, agentOf(payload));
       process.exit(0);
     }
     if (event === 'Stop' || event === 'SubagentStop') {

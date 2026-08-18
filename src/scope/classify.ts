@@ -132,6 +132,45 @@ export interface ClassifyDeps {
   forced?: string[];
 }
 
+/**
+ * Files so generically named that seeing the word proves nothing.
+ *
+ * "update the route" must not put every `route.ts` in the repo beyond question.
+ */
+/** The file types Ichor compiles into the graph. Anything else it cannot read. */
+const ANALYSED = /\.(ts|tsx|prisma)$/;
+
+const GENERIC_FILENAMES = new Set([
+  'index.ts', 'index.tsx', 'page.tsx', 'page.ts', 'route.ts', 'route.tsx',
+  'layout.tsx', 'types.ts', 'utils.ts', 'config.ts', 'main.ts', 'app.tsx',
+]);
+
+/**
+ * Did the developer name this exact file in the task?
+ *
+ * A file that does not exist yet cannot be anchored — there is nothing in the
+ * graph to match — so "create lib/test-widget.ts with a signup helper" drew a
+ * boundary that could not contain the one file the sentence was about, and Ichor
+ * challenged it: *"lib/test-widget.ts is new and Ichor found no connection to the
+ * task"*. Measured in a live session, where the agent had to answer back that the
+ * file WAS the task. A tool that questions the thing it was just asked for is a
+ * tool people stop believing.
+ *
+ * The path decides it, because the path is the developer stating their intent
+ * outright rather than any inference about it (ENGINEERING-RULES rule 1a). A bare
+ * filename counts only when it is distinctive enough to mean one thing.
+ */
+export function taskNamesFile(task: string, file: string): boolean {
+  const said = task.toLowerCase().replace(/\\/g, '/');
+  const wanted = file.toLowerCase().replace(/\\/g, '/');
+  if (!wanted) return false;
+  if (said.includes(wanted)) return true;
+
+  const base = wanted.slice(wanted.lastIndexOf('/') + 1);
+  if (base.length < 6 || GENERIC_FILENAMES.has(base)) return false;
+  return said.includes(base);
+}
+
 export async function classify(intent: ChangeIntent, deps: ClassifyDeps): Promise<Verdict> {
   const { neighborhood } = deps;
   const evidence: Evidence[] = [];
@@ -258,6 +297,31 @@ export async function classify(intent: ChangeIntent, deps: ClassifyDeps): Promis
   const pending = deps.pending;
 
   if (!pending) {
+    /**
+     * A file Ichor cannot read is not evidence of anything.
+     *
+     * Ichor analyses TypeScript. A .css, .json, .md or .yml file can never be in
+     * the graph, so "not in the graph" says nothing about it — and challenging on
+     * that basis is asserting scope expansion from no evidence at all, which is
+     * the one thing this codebase must not do (ENGINEERING-RULES rule 3).
+     *
+     * Seen in a live Codex session, where the task was literally "go to css file
+     * and lets do some random css add" and Ichor challenged app/globals.css for
+     * being unreadable. The agent overrode it, correctly, and every challenge
+     * after that starts from a worse position.
+     *
+     * Allowed with a note. The Stop handler still names it, so the change is
+     * recorded rather than lost — it simply is not called scope expansion.
+     */
+    if (!ANALYSED.test(intent.file)) {
+      return {
+        decision: 'NOT_JUDGED',
+        reason: `${intent.file} is not a file type Ichor analyses, so it has no basis to judge it.`,
+        evidence: [{ kind: 'note', text: 'outside the analysed file types (TypeScript, Prisma)' }],
+        needsJudge: false,
+      };
+    }
+
     evidence.push({ kind: 'note', text: 'no content available for a file outside the graph' });
     return {
       decision: 'HUMAN_REVIEW',
@@ -319,6 +383,17 @@ export async function classify(intent: ChangeIntent, deps: ClassifyDeps): Promis
       decision: 'CONNECTED',
       reason: `${intent.file} is new but connects to the task (${reach.summary}).`,
       evidence,
+      needsJudge: false,
+    };
+  }
+
+  // Asked for by name. The answer to "why does this file exist" is in the task
+  // sentence itself, so there is nothing to ask about.
+  if (taskNamesFile(neighborhood.task, intent.file)) {
+    return {
+      decision: 'EXPECTED',
+      reason: `${intent.file} is named in the task itself.`,
+      evidence: [{ kind: 'note', text: 'the task names this file directly' }],
       needsJudge: false,
     };
   }

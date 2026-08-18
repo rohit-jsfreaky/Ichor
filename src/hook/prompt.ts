@@ -103,6 +103,11 @@ export function readPrompt(payload: HookPayload): string {
   return '';
 }
 
+/** Which host sent this, decided by the field that carries the turn id. */
+export function agentOf(payload: HookPayload): 'claude-code' | 'codex' {
+  return typeof payload.turn_id === 'string' && payload.turn_id ? 'codex' : 'claude-code';
+}
+
 /** Claude Code sends `prompt_id`; Codex sends `turn_id`. Either identifies a turn. */
 function readPromptId(payload: HookPayload): string | undefined {
   for (const key of ['prompt_id', 'turn_id'] as const) {
@@ -621,6 +626,46 @@ async function drawBoundary(
 }
 
 /** Emit the briefing. Plain text only — this hook can never block a prompt. */
-export function emitContext(context: string): void {
-  if (context.trim()) writeStdoutSync(`${context}\n`);
+/**
+ * Hand the briefing to whichever agent asked for it.
+ *
+ * THE TWO HOSTS DISAGREE ABOUT THE SHAPE, and finding that out cost a whole
+ * integration. Claude Code takes plain stdout and appends it to the turn. Codex
+ * requires JSON, and answers plain text with:
+ *
+ *   UserPromptSubmit hook (failed)
+ *   error: hook returned invalid user prompt submit JSON output
+ *
+ * Observed in a live Codex session. The failure is near-silent — one line in
+ * Codex's own output, nothing in Ichor's log — and it means the briefing never
+ * arrives at all: no scope, no file list, and no mention of the retrieval
+ * commands. Which is exactly what was seen: Codex reached for rg because nothing
+ * had ever told it there was an alternative.
+ *
+ * The agent is identified by the field that carries the turn: Claude Code sends
+ * prompt_id, Codex sends turn_id. Reusing that discriminator rather than
+ * inventing one keeps a single answer to 'who am I talking to' in this file.
+ */
+export function contextPayload(
+  context: string,
+  agent: 'claude-code' | 'codex' = 'claude-code',
+): string {
+  if (!context.trim()) return '';
+
+  if (agent === 'codex') {
+    return JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'UserPromptSubmit',
+        additionalContext: context,
+      },
+    });
+  }
+
+  return `${context}\n`;
+}
+
+/** Emit the briefing. Plain text only — this hook can never block a prompt. */
+export function emitContext(context: string, agent: 'claude-code' | 'codex' = 'claude-code'): void {
+  const payload = contextPayload(context, agent);
+  if (payload) writeStdoutSync(payload);
 }

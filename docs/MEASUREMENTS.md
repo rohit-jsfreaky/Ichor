@@ -61,7 +61,7 @@ true, one of the numbers is stale.
 
 | Suite | Count | Command | Verified |
 |---|---|---|---|
-| unit | 198 | `npm test` | ✅ 198 passed |
+| unit | 212 | `npm test` | ✅ 212 passed |
 | classification scenarios | 10 | `npm run check` | ✅ 10/10 |
 | session harness | 12 | `npm run session:test` | ✅ 12 passed, 0 failed |
 | MCP protocol | 20 | `npm run mcp:test` | ⚠️ 20/20 in isolation — see below |

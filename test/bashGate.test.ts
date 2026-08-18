@@ -24,6 +24,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { detectBashChanges, loadGateState, saveGateState } from '../src/hook/bashGate.js';
+import { taskNamesFile } from '../src/scope/classify.js';
 import { loadTask, markJudged, saveTask, updateTask } from '../src/state.js';
 import type { Neighborhood } from '../src/scope/neighborhood.js';
 
@@ -220,5 +221,29 @@ describe('the high-water mark that makes this affordable', () => {
 
     expect(() => loadGateState(repo, task)).not.toThrow();
     expect(loadGateState(repo, task).seen).toEqual({});
+  });
+});
+
+describe('a file the task named outright', () => {
+  /**
+   * From a live session. The prompt was "create lib/test-widget.ts with a
+   * newsletter signup helper, use a bash heredoc"; Ichor challenged
+   * lib/test-widget.ts for having "no connection to the task", and the agent had
+   * to answer that the file WAS the task. A file that does not exist yet cannot
+   * be anchored, so the boundary can never contain it — the task sentence is the
+   * only evidence there is, and it is conclusive.
+   */
+  it('is recognised however the path is written', () => {
+    const task = 'create lib/test-widget.ts with a newsletter signup helper, use a bash heredoc';
+    expect(taskNamesFile(task, 'lib/test-widget.ts')).toBe(true);
+    expect(taskNamesFile(task, 'lib\\test-widget.ts')).toBe(true);
+    expect(taskNamesFile('add a retry to uploads', 'lib/test-widget.ts')).toBe(false);
+  });
+
+  it('accepts a bare filename only when it is distinctive', () => {
+    expect(taskNamesFile('fix the bug in test-widget.ts', 'lib/test-widget.ts')).toBe(true);
+    // "update the route" must not exempt every route.ts in the repository.
+    expect(taskNamesFile('update the route', 'app/api/things/route.ts')).toBe(false);
+    expect(taskNamesFile('tidy up index.ts', 'src/index.ts')).toBe(false);
   });
 });

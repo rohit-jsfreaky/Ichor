@@ -3,10 +3,11 @@
  *
  * This is the reason Ichor reads a 200,000-line codebase in seconds instead of
  * a minute. Asking TypeScript's checker "which function is this?" costs about
- * 2.45ms per call site, and a real repository has 33,000 of them — roughly
- * forty seconds. Measured against what that buys: of the calls that actually
- * become an edge in our graph, 96.5% are a plain `send(x)`, 1% are `this.foo()`,
- * and only 2.5% are `obj.method()` on a value whose type only the checker knows.
+ * 2.45ms per call site, and a real repository has ~16,300 that need resolving —
+ * roughly forty seconds. Measured against what that buys: of the calls that
+ * actually become an edge in our graph, 96.5% are a plain `send(x)`, 1% are
+ * `this.foo()`, and only 2.5% are `obj.method()` on a value whose type only the
+ * checker knows.
  *
  * Forty seconds for 2.5% is a bad trade, and the other 97.5% needs no inference
  * at all — just bookkeeping. `import { send } from './email'` plus the list of

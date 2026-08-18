@@ -90,3 +90,13 @@ temp/
 *.orig
 .resolver-baseline/
 .ground-truth/
+
+# ---------------------------------------------------- internal working documents
+# Build logs, bug ledgers and hackathon planning. These are how the project was
+# built, not part of what it is, and several quote pre-fix numbers that the
+# README has since corrected — shipping them would publish contradictions.
+# docs/MEASUREMENTS.md is deliberately NOT here: it is the README's companion.
+BUGS.md
+TASKS.md
+PROJECT_FINAL.md
+SCOPE.md

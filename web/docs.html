@@ -167,7 +167,7 @@ cd your-repo
 
       <p><code>ichor init</code> writes into your repo and <em>merges</em> rather than overwrites — an existing <code>.claude/settings.json</code>, <code>.codex/hooks.json</code> or <code>.mcp.json</code> keeps everything it already had. It also adds <code>.ichor/</code> to your <code>.gitignore</code>, because that is where Ichor keeps its own state.</p>
 
-      <p>The first read takes a while and only happens once: about <strong>25 seconds for 1,400 files</strong>, and a minute and a half for the largest repository tested (7,735 files). After that, catching up on your edits takes seconds.</p>
+      <p>The first read takes a while and only happens once: about <strong>19 seconds for 1,362 files</strong>, and 2m 21s for the largest repository tested (7,735 files). After that, catching up on your edits takes seconds.</p>
 
       <div class="note">
         <p><strong>One database per repository.</strong> Projects never bleed into each other — that is tested with four loaded at once — but HydraDB cannot index the property Ichor uses to tell them apart, so every extra project makes queries slower. Three share one comfortably. More will not, so <code>ichor init</code> writes a database stack into each repo.</p>
@@ -318,7 +318,7 @@ cd your-repo
       <p>Claude Code ignores <code>permissions.allow</code> from a project's settings until the workspace is trusted, and untrusted is the default for a fresh clone. Open <code>claude</code> interactively in the repo once and accept the trust dialog. The hooks and every verdict work either way — only the pre-approval waits on trust.</p>
 
       <h3>It never notices when I switch tasks</h3>
-      <p>Name the file you mean. Measured on a 7,741-file repository: an ordinary sentence matches thousands of files, so a prompt built only of common words cannot say where you have moved to. A prompt that <em>names</em> a path does, however incidental the rest of the sentence — <em>"fix the retry in <code>backend/src/services/x/y.ts</code>"</em> is noticed, <em>"fix the retry"</em> is not. <code>ichor start "…"</code> always works.</p>
+      <p>Name the file you mean. Measured on the largest repository tested (7,735 files): an ordinary sentence matches thousands of files, so a prompt built only of common words cannot say where you have moved to. A prompt that <em>names</em> a path does, however incidental the rest of the sentence — <em>"fix the retry in <code>backend/src/services/x/y.ts</code>"</em> is noticed, <em>"fix the retry"</em> is not. <code>ichor start "…"</code> always works.</p>
 
       <h3>Codex runs no hooks</h3>
       <p>Codex asks you to trust a hook file the first time it sees one, and <code>codex exec</code> cannot show that prompt — so in non-interactive mode it silently runs none. Use interactive <code>codex</code> and approve it once. That is Codex's behaviour rather than Ichor's, but it is worth knowing before concluding the integration is broken.</p>
@@ -330,7 +330,7 @@ cd your-repo
 
       <ul>
         <li><strong>TypeScript and JavaScript only.</strong> Python is next. Nothing else is claimed.</li>
-        <li><strong>Name the file you mean.</strong> A prompt of common words is matched on those words, and on a large repo that reaches wider than the job does — which means fewer challenges, not more. Naming a path scopes the boundary to that file and its graph neighbours instead: measured on a 1,378-file repo, 18 files of guesswork down to the 1 you pointed at. A bare filename has to be unique in the repo to count.</li>
+        <li><strong>Name the file you mean.</strong> A prompt of common words is matched on those words, and on a large repo that reaches wider than the job does — which means fewer challenges, not more. Naming a path scopes the boundary to that file and its graph neighbours instead: measured on the 1,362-file repository, 18 files of guesswork down to the 1 you pointed at. A bare filename has to be unique in the repo to count.</li>
         <li><strong>Shell writes cannot be challenged, only accounted for.</strong> Ichor hooks the agent's edit tools, so a file written by <code>cat &gt;</code>, a codegen script or your own editor is invisible at the moment it happens. At the end of the turn Ichor names anything that changed without ever reaching a verdict, so silence means <em>nothing was out of scope</em> rather than <em>Ichor was never asked</em>.</li>
         <li><strong>Static analysis, and it says so.</strong> Dynamic dispatch and runtime-constructed calls cannot be seen, so results are a floor and never a ceiling. A call Ichor cannot resolve is counted and reported, never guessed — on a 1,362-file repo that was 7,178 call sites it declined to invent an edge for.</li>
       </ul>

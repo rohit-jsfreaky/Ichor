@@ -75,7 +75,7 @@ A search tool finds the string `send`. Ichor works out *which* `send`.
 
 `import { send } from './email'` plus that module's export list **is** the answer — so a call becomes an edge to a declaration Ichor can name, followed through re-exports, namespace imports and default exports. Never a same-name coincidence in an unrelated file, and never a hit inside a comment or a string literal.
 
-It deliberately does **not** use TypeScript's type checker to do this, and that was a measurement rather than a shortcut. Asking the checker "which function is this?" costs ~2.45ms per call site, and a real repository has 33,000 of them — about forty seconds. Of the calls that actually become an edge, **96.5%** are a plain `send(x)`, 1% are `this.foo()`, and only **2.5%** are `obj.method()` on a value whose type only the checker knows. Forty seconds for 2.5% is a bad trade; the other 97.5% needs no inference at all, just bookkeeping.
+It deliberately does **not** use TypeScript's type checker to do this, and that was a measurement rather than a shortcut. Asking the checker "which function is this?" costs ~2.45ms per call site, and a real repository has ~16,300 that need resolving — about forty seconds. Of the calls that actually become an edge, **96.5%** are a plain `send(x)`, 1% are `this.foo()`, and only **2.5%** are `obj.method()` on a value whose type only the checker knows. Forty seconds for 2.5% is a bad trade; the other 97.5% needs no inference at all, just bookkeeping.
 
 ### And it reports what it could not resolve
 
@@ -141,11 +141,11 @@ Scope of the claim: one repository, 30 commits, 86 changed files of every type, 
 
 | | papermark (1,362 files) | Infisical (7,735 files) |
 |---|---|---|
-| first index, empty database | 25s | 2m 21s |
+| first index, empty database | ~19s | 2m 21s |
 | second index, nothing changed | **6s** | **16s** |
-| peak memory | 346 MB | 788 MB |
+| peak memory | under 400 MB | under 800 MB |
 
-Both at Node's default heap — there is no `--max-old-space-size` anywhere in this repository. `npm run read:test -- <repo>` answers "can Ichor read my codebase" before you install anything.
+Both at Node's default heap — there is no `--max-old-space-size` anywhere in this repository. `npm run read:test -- <repo>` answers "can Ichor read my codebase" before you install anything. Timings are wall clock on one machine and published as approximations for that reason; every number in this README, the command that produces it, and how recently it was checked are in [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md).
 
 Refreshes re-read only what changed, and `npm run incremental:test` asserts an incremental read is **identical** to a full one, because a stale graph never announces itself. `npm run delta:test -- <repo>` checks the written graph against the code per relationship type — papermark is 3,471 functions and **21,384** connections — because a fast write and a correct one are different things.
 

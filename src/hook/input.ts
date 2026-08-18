@@ -45,6 +45,20 @@ export interface ParsedHookInput {
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'apply_patch']);
 
+/**
+ * Shell tools, whose file changes can only be judged after they run.
+ *
+ * Claude Code names them `Bash` and `PowerShell`; Codex names its own `shell` and
+ * `local_shell`. All four are listed because the gate reads what changed on disk
+ * rather than parsing the command, so it is agnostic about which shell ran —
+ * only about the fact that one did.
+ */
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'shell', 'local_shell']);
+
+export function isShellTool(toolName: string): boolean {
+  return SHELL_TOOLS.has(toolName);
+}
+
 /** True when this tool call could modify a file. Everything else is ignored. */
 export function isEditingTool(toolName: string): boolean {
   return EDIT_TOOLS.has(toolName);

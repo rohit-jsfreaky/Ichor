@@ -39,11 +39,29 @@ describe('the three events', () => {
       // PreToolUse challenges. UserPromptSubmit notices the developer changing
       // job. Stop rebuilds the graph while nobody is waiting. Missing any one
       // fails silently — nothing errors, Ichor just stops keeping up.
-      for (const event of ['PreToolUse', 'UserPromptSubmit', 'Stop']) {
+      for (const event of ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop']) {
         expect(hooks[event], `${label}: ${event}`).toBeDefined();
         expect(Array.isArray(hooks[event][0].hooks), `${label}: ${event} nested`).toBe(true);
         expect(hooks[event][0].hooks[0].command).toBe('ichor hook');
       }
+    }
+  });
+
+  it('gates shell tools after they run, for both hosts', () => {
+    // A file written by `sed`, a heredoc or a script fires no PreToolUse hook.
+    // Since Claude Code began telling agents to prefer the shell for edits, that
+    // is the road most edits take, so PostToolUse is not optional cover — it is
+    // the main gate for auto-mode sessions.
+    installHooks(repo);
+
+    for (const file of ['.claude/settings.json', '.codex/hooks.json']) {
+      const entry = read(file).hooks.PostToolUse[0];
+      // Both hosts' shell names, because the gate reads what changed on disk and
+      // does not care which shell ran.
+      for (const tool of ['Bash', 'PowerShell', 'shell', 'local_shell']) {
+        expect(entry.matcher, `${file} matches ${tool}`).toContain(tool);
+      }
+      expect(entry.hooks[0].command).toBe('ichor hook');
     }
   });
 

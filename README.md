@@ -46,7 +46,7 @@ That is not a mock-up. It is the literal output of `ichor hook` against the demo
 |---|---|
 | **What it does** | Judges every edit your agent is about to write against the job you asked for |
 | **How** | A compiled graph of your codebase — what calls what, which endpoints reach which tables — kept in [HydraDB](https://github.com/hydra-db/hydradb) |
-| **When** | Before the write lands, as a `PreToolUse` hook. Not a linter, not a review bot |
+| **When** | Before the write lands for an edit tool; the instant the command finishes for a shell write, before the agent continues. `PreToolUse` + `PostToolUse`. Not a linter, not a review bot |
 | **Cost of being wrong** | It questions about **one edit in eight** that you were right to make. Measured on somebody else's repo, not estimated |
 | **Needs a key?** | No. A key adds one thing: weighing an agent's *argument* when the graph alone cannot settle it |
 | **Blocks anything?** | Never. It asks once per file, and takes your answer |
@@ -164,7 +164,27 @@ The same graph that judges edits will answer questions, so your agent stops gues
 
 Five more cover scope, evidence and requesting an expansion. Asked *"what breaks if I delete the useAuth hook?"* on a real project, a live agent answered with **one `ichor_impact` call and nothing else** — no grep, no file reads.
 
-Ichor names these in the context it injects each turn, because a tool description alone does not reach an agent: hosts defer MCP schemas when several servers are connected, and an unnamed tool is one the agent never sees.
+**They are shell commands too, and that turned out to matter.**
+
+```bash
+ichor find "where uploads are retried"   # structure, not a grep guess
+ichor impact uploadFileToR2              # callers, routes, tables at stake
+ichor paths Vendor                       # how a table is actually reached
+ichor check lib/api/uploads.ts           # is this file in the current job?
+```
+
+Same graph, same answers, one implementation — the CLI dispatches into the same
+function the MCP server does.
+
+The second door exists because of a measurement. Claude Code injects "search with
+grep and find" into auto-mode turns for some models, and counted across one
+repository's sessions, every turn carrying that instruction used Ichor's tools
+**zero** times and never even loaded their descriptions — while every turn
+without it used them freely. Ichor was losing an argument with a platform
+instruction that arrives every turn from the system position. So it stopped
+arguing: the instruction says reach for the shell, and these are the shell.
+
+Ichor names them in the context it injects each turn, because a description alone does not reach an agent: hosts defer MCP schemas when several servers are connected, and an unnamed tool is one the agent never sees.
 
 ---
 
@@ -239,7 +259,7 @@ npm run judge:test            # a live Judge, three cases, a few cents
 
 - **TypeScript and JavaScript only.** Python is next. Nothing else is claimed.
 - **It questions about one edit in eight that you were right to make.** Naming the file in your prompt is what makes the boundary precise — on a real project that was 135 functions of guesswork down to the 9 in the file named.
-- **A shell write cannot be challenged.** Ichor hooks edit tools, so a file written by `cat >`, a codegen script or your own editor is invisible in the moment. It is named at the end of the turn instead, so silence never means "nobody looked".
+- **A shell write is challenged after it lands, not before.** An agent told to edit with `sed` or a heredoc — which is what Claude Code now instructs in auto mode — fires no `PreToolUse` hook, so Ichor reads what actually changed on disk once the command finishes and challenges then. The bytes are written by the time the question is asked; what is preserved is that nothing has been built on top of them yet. A write from your own editor, or from a process Ichor never sees run, is still only named at the end of the turn.
 - **Ichor can be wrong.** The boundary is an expectation, not a fact, and it is designed to grow when the work justifies it. When it cannot verify a justification it asks you rather than deciding.
 
 Static-analysis blind spots, memory ceilings, one-database-per-repo and the rest are in [`web/docs.html`](web/docs.html).

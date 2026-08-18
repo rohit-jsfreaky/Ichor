@@ -137,7 +137,10 @@ describe('the scope briefing announces what it is', () => {
 
   it('lists the FILES in scope, because a verdict is about a file', () => {
     expect(briefing).toMatch(/Files in scope \(1\): src\/smtp\.ts/);
-    expect(briefing).toMatch(/An edit to a file outside that list will be questioned/);
+    // Both routes named: a shell write is gated too, so promising only about
+    // 'an edit' would understate what Ichor actually does now.
+    expect(briefing).toMatch(/Any file change outside that list will be questioned/);
+    expect(briefing).toMatch(/edit tool or a shell command/);
   });
 
   /**
@@ -160,7 +163,7 @@ describe('the scope briefing announces what it is', () => {
     const briefed = scopeBriefing(many, 'session-a');
     expect(briefed).toMatch(/Files in scope: 40, of which 8 shown/);
     expect(briefed).toMatch(/the list above is partial/);
-    expect(briefed).toMatch(/call ichor_check_change with the path/);
+    expect(briefed).toMatch(/ichor check <path>/);
     expect(briefed).not.toMatch(/outside that list will be questioned/);
   });
 

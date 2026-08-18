@@ -23,6 +23,15 @@ import { writeStack } from '../stack/stack.js';
 const MATCHER = 'Edit|Write|MultiEdit|apply_patch';
 
 /**
+ * Shell tools, matched after they run.
+ *
+ * Claude Code names them Bash and PowerShell; Codex names its own shell and
+ * local_shell. All four are listed so one registration covers both hosts — the
+ * gate reads what changed on disk, so it does not care which shell ran.
+ */
+const SHELL_MATCHER = 'Bash|PowerShell|shell|local_shell';
+
+/**
  * Deliberately `ichor`, not `npx ichor`.
  *
  * The npm name is `ichor-cli` because `ichor` is already taken by an unrelated
@@ -115,6 +124,15 @@ function alreadyInstalled(entries: unknown): boolean {
  */
 const EVENTS: { name: string; matcher?: string }[] = [
   { name: 'PreToolUse', matcher: MATCHER },
+  /**
+   * The shell gate.
+   *
+   * A file changed by `sed`, a heredoc or a script fires no PreToolUse hook, and
+   * since Claude Code began telling agents to prefer the shell for edits, that is
+   * the road most edits take. PostToolUse fires after the command, which is the
+   * earliest moment the change can actually be known. See hook/bashGate.ts.
+   */
+  { name: 'PostToolUse', matcher: SHELL_MATCHER },
   { name: 'UserPromptSubmit' },
   { name: 'Stop' },
 ];

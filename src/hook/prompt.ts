@@ -318,8 +318,8 @@ export function scopeBriefing(task: PersistedTask, sessionId?: string): string {
    */
   lines.push(
     files.length > FILES_SHOWN
-      ? 'An edit to a file outside the job will be questioned, and the list above is partial — call ichor_check_change with the path if you are unsure whether a file is in it.'
-      : 'An edit to a file outside that list will be questioned. If one is genuinely required, call ichor_check_change first and explain why.',
+      ? 'Any file change outside the job will be questioned — made with an edit tool or a shell command alike — and the list above is partial. Run `ichor check <path>` if you are unsure whether a file is in it.'
+      : 'Any file change outside that list will be questioned, whether it is made with an edit tool or a shell command. If one is genuinely required, run `ichor check <path>` first and explain why.',
   );
 
   /**
@@ -359,11 +359,29 @@ export function scopeBriefing(task: PersistedTask, sessionId?: string): string {
  * Exploring is when retrieval is worth most. Someone asking "what breaks if I change
  * this" has no task open yet, by definition.
  */
+/**
+ * Offered as SHELL COMMANDS, not only as MCP tools.
+ *
+ * Measured across one repository's sessions: every turn carrying Claude Code's
+ * "search with grep and find" instruction used zero ichor tools and never even
+ * loaded their descriptions, while every turn without it used them freely. The
+ * offer was losing to a platform instruction that arrives every turn from the
+ * system position, and no wording was going to win that argument.
+ *
+ * So the offer changed shape instead. These are the same three questions, run as
+ * shell commands — which is exactly what the agent has been told to reach for.
+ * The MCP tools are still named for hosts that load them, but second, because the
+ * command line is the door that is currently open.
+ */
 function retrievalOffer(): string {
   return (
-    'Available for this repo instead of guessing at grep patterns: ichor_find (where ' +
-    'something lives, described in plain words), ichor_impact (what breaks if a symbol ' +
-    'changes), ichor_paths (how a table is reached).'
+    'Search this repo by structure rather than by guessing at grep patterns — these ' +
+    'read the compiled graph, so they find code whose name you could not have guessed ' +
+    'and skip matches in comments and strings:\n' +
+    '  ichor find "<what you are looking for, in plain words>"\n' +
+    '  ichor impact <symbol>   what breaks if this changes\n' +
+    '  ichor paths <Model>     how a table is reached, and through which endpoints\n' +
+    'The same answers are available as the ichor_find / ichor_impact / ichor_paths tools.'
   );
 }
 

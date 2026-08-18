@@ -139,7 +139,14 @@ function releaseLock(repoRoot: string): void {
  * reported path against the one it had just written, in a repo that happens to be
  * a subdirectory — the single arrangement no other suite used.
  */
-export function gitChangedPaths(repoRoot: string): string[] {
+export interface GitChange {
+  /** Path relative to the watched root. */
+  path: string;
+  /** Porcelain status, e.g. `??` for a new file, ` M` for an edit, ` D` for a delete. */
+  status: string;
+}
+
+export function gitChangedEntries(repoRoot: string): GitChange[] {
   try {
     const run = (args: string[]) =>
       spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', timeout: 3_000 });
@@ -156,18 +163,34 @@ export function gitChangedPaths(repoRoot: string): string[] {
 
     return result.stdout
       .split(/\r?\n/)
-      .map((line) => line.slice(3).trim())
+      .filter((line) => line.length > 3)
+      .map((line) => ({ status: line.slice(0, 2), path: line.slice(3).trim() }))
       // A rename reads `old -> new`; the new path is the one that exists now.
-      .map((p) => (p.includes(' -> ') ? p.slice(p.lastIndexOf(' -> ') + 4) : p))
+      .map((e) =>
+        e.path.includes(' -> ') ? { ...e, path: e.path.slice(e.path.lastIndexOf(' -> ') + 4) } : e,
+      )
       // Quoted when the path contains unusual characters.
-      .map((p) => (p.startsWith('"') && p.endsWith('"') ? p.slice(1, -1) : p))
-      .filter((p) => p.length > 0)
-      .filter((p) => !prefix || p.startsWith(prefix))
-      .map((p) => (prefix ? p.slice(prefix.length) : p))
-      .filter((p) => /\.(ts|tsx)$/.test(p) || p.endsWith('.prisma'));
+      .map((e) =>
+        e.path.startsWith('"') && e.path.endsWith('"') ? { ...e, path: e.path.slice(1, -1) } : e,
+      )
+      .filter((e) => e.path.length > 0)
+      .filter((e) => !prefix || e.path.startsWith(prefix))
+      .map((e) => (prefix ? { ...e, path: e.path.slice(prefix.length) } : e))
+      .filter((e) => /\.(ts|tsx)$/.test(e.path) || e.path.endsWith('.prisma'));
   } catch {
     return [];
   }
+}
+
+/**
+ * The changed paths alone, for callers that do not care how a file changed.
+ *
+ * Kept as a wrapper rather than a second walk: every correction above — the
+ * monorepo prefix, renames, quoted paths — has to apply identically to both
+ * callers, or the refresh and the Bash gate disagree about what changed.
+ */
+export function gitChangedPaths(repoRoot: string): string[] {
+  return gitChangedEntries(repoRoot).map((entry) => entry.path);
 }
 
 export interface StalenessReason {

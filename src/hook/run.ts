@@ -29,9 +29,10 @@ import {
   recordOverlay,
   type OverlayFile,
 } from '../state.js';
-import { parseHookInput, isEditingTool, type HookPayload } from './input.js';
+import { parseHookInput, isEditingTool, isShellTool, type HookPayload } from './input.js';
 import { emitContext, handlePrompt } from './prompt.js';
 import { handleStop } from './stop.js';
+import { judgeBashChanges } from './bashGate.js';
 import { repoIdFor } from '../ids.js';
 
 /** Beyond this, allow the edit rather than make the agent wait. */
@@ -96,6 +97,40 @@ function deny(reason: string): void {
   // fs.writeSync on fd 1 blocks until the bytes are gone, which is the only
   // way to be certain before exiting.
   writeStdoutSync(JSON.stringify(decision));
+  process.exit(0);
+}
+
+/**
+ * Say something about a change that has ALREADY happened.
+ *
+ * PostToolUse cannot deny — the tool has run and the bytes are on disk — so this
+ * is feedback, not a block. The point is timing: the agent has not yet built
+ * anything on top of the change, and it has to answer before it does.
+ *
+ * TWO CHANNELS IN ONE OBJECT, ON PURPOSE. The hook contract for PostToolUse has
+ * moved: `decision: "block"` is honoured by some versions, `additionalContext`
+ * by others, and unknown fields are ignored by both. Emitting both means the
+ * message lands whichever is current, and the failure mode if neither is
+ * honoured is silence — never a false block. `ICHOR_POST_CHANNEL=stderr`
+ * switches to exit-2 + stderr, the third documented route, without a rebuild.
+ */
+function postFeedback(reason: string): void {
+  if (process.env.ICHOR_POST_CHANNEL === 'stderr') {
+    // Exit 2 is the documented "blocking error, show stderr to Claude" path.
+    process.stderr.write(reason);
+    process.exit(2);
+  }
+
+  writeStdoutSync(
+    JSON.stringify({
+      decision: 'block',
+      reason,
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext: reason,
+      },
+    }),
+  );
   process.exit(0);
 }
 
@@ -229,6 +264,27 @@ export async function runHook(): Promise<void> {
     if (event === 'Stop' || event === 'SubagentStop') {
       debug(`--- ${event}`);
       for (const line of handleStop(repoRoot)) debug(line);
+      allow();
+      return;
+    }
+
+    /**
+     * A shell command has finished. Judge whatever it changed.
+     *
+     * Placed here, before the editing-tool gate, because the tool that fires this
+     * is `Bash` — which that gate exists to reject. See hook/bashGate.ts for why
+     * this is post-hoc and why that is the honest design rather than a shortcut.
+     */
+    if (event === 'PostToolUse') {
+      const tool = String(payload.tool_name ?? '');
+      if (!isShellTool(tool)) allow();
+      debug(`--- PostToolUse ${tool}`);
+      const outcome = await judgeBashChanges(repoRoot);
+      for (const line of outcome.log) debug(line);
+      if (outcome.challenge) {
+        const task = loadTask(repoRoot);
+        postFeedback(formatChallenge(outcome.challenge, task?.task ?? ''));
+      }
       allow();
       return;
     }

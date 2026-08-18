@@ -372,7 +372,14 @@ async function callTool(
   return runTool(name, args, repoRoot, requireTask, getGraph);
 }
 
-async function runTool(
+/**
+ * Dispatch one tool call.
+ *
+ * Exported because the CLI reaches retrieval through this same function (see
+ * src/retrieval.ts). Two implementations of the same question would drift, and a
+ * shell answer that disagrees with the MCP answer is worse than either alone.
+ */
+export async function runTool(
   name: string,
   args: Record<string, unknown>,
   repoRoot: string,

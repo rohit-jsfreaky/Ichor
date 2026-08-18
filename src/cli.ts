@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 import { GraphClient, configFromEnv } from './graph/client.js';
 import { explainFailure } from './errors.js';
+import { retrieve } from './retrieval.js';
 import { findAnchors } from './scope/anchors.js';
 import { buildNeighborhood } from './scope/neighborhood.js';
 import { saveTask, loadTask, clearTask, stateDir, writeAtomic } from './state.js';
@@ -389,6 +390,79 @@ async function checkKey(key: string): Promise<boolean | undefined> {
     return undefined;
   }
 }
+
+/**
+ * Retrieval from a shell, not only over MCP.
+ *
+ * These are the same three questions the MCP tools answer, reachable as commands
+ * because that is the door the agent is currently told to use. See
+ * src/retrieval.ts for the measurement behind that.
+ *
+ * Deliberately NOT hidden: a person debugging their own repo wants these too, and
+ * a tool an agent is told about but a human cannot run is hard to trust.
+ */
+const retrievalRepo = (options: { repo: string }) => path.resolve(options.repo);
+
+async function runRetrieval(
+  command: Parameters<typeof retrieve>[0],
+  args: Record<string, unknown>,
+  options: { repo: string },
+): Promise<void> {
+  try {
+    console.log(await retrieve(command, args, retrievalRepo(options)));
+  } catch (error) {
+    // A retrieval failure is not a crash: say what went wrong and exit non-zero.
+    for (const line of explainFailure(error)) console.error(line);
+    process.exitCode = 1;
+  }
+}
+
+program
+  .command('find')
+  .description('where something lives, described in plain words instead of a grep pattern')
+  .argument('<words...>', 'plain description, e.g. "where uploads are retried"')
+  .option('--repo <path>', 'repository root', process.cwd())
+  .option('--limit <n>', 'how many results', '15')
+  .action(async (words: string[], options: { repo: string; limit: string }) => {
+    await runRetrieval('find', { query: words.join(' '), limit: Number(options.limit) || 15 }, options);
+  });
+
+program
+  .command('impact')
+  .description('what else is affected if this function or type changes')
+  .argument('<symbol>', 'exact function or type name')
+  .option('--repo <path>', 'repository root', process.cwd())
+  .action(async (symbol: string, options: { repo: string }) => {
+    await runRetrieval('impact', { symbol }, options);
+  });
+
+program
+  .command('paths')
+  .description('how the app reaches a database table, and through which endpoints')
+  .argument('<model>', 'model or table name, e.g. Vendor')
+  .option('--repo <path>', 'repository root', process.cwd())
+  .option('--route <url>', 'only paths whose URL contains this')
+  .action(async (model: string, options: { repo: string; route?: string }) => {
+    await runRetrieval('paths', { model, ...(options.route ? { route: options.route } : {}) }, options);
+  });
+
+program
+  .command('callers')
+  .description('what calls this function')
+  .argument('<symbol>', 'exact function name')
+  .option('--repo <path>', 'repository root', process.cwd())
+  .action(async (symbol: string, options: { repo: string }) => {
+    await runRetrieval('callers', { symbol }, options);
+  });
+
+program
+  .command('check')
+  .description('is a file part of the current task, and why')
+  .argument('<file>', 'path relative to the repository root')
+  .option('--repo <path>', 'repository root', process.cwd())
+  .action(async (file: string, options: { repo: string }) => {
+    await runRetrieval('check', { file }, options);
+  });
 
 program
   .command('hook', { hidden: true })

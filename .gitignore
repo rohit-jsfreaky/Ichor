@@ -100,3 +100,6 @@ BUGS.md
 TASKS.md
 PROJECT_FINAL.md
 SCOPE.md
+
+# ---------------------------------------------------------------- npm artifacts
+*.tgz

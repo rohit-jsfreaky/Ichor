@@ -4,11 +4,29 @@
   "description": "Make every scope expansion explicit while AI coding agents work. Built on HydraDB.",
   "type": "module",
   "license": "MIT",
+  "homepage": "https://github.com/rohit-jsfreaky/ichor#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rohit-jsfreaky/ichor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rohit-jsfreaky/ichor/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "ai-agents",
+    "code-graph",
+    "scope",
+    "typescript",
+    "static-analysis",
+    "hydradb",
+    "mcp"
+  ],
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "ichor": "./dist/src/cli.js"
+    "ichor": "dist/src/cli.js"
   },
   "files": [
     "dist/src",

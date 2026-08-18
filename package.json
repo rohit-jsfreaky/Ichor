@@ -1,6 +1,6 @@
 {
   "name": "ichor-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Make every scope expansion explicit while AI coding agents work. Built on HydraDB.",
   "type": "module",
   "license": "MIT",

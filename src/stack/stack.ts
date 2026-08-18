@@ -14,6 +14,7 @@ import * as path from 'node:path';
 
 import { GraphClient, configFromEnv } from '../graph/client.js';
 import { AUTH_TOKEN, COMPOSE_FILE, COMPOSE_YAML, TOKEN_FILE } from './compose.js';
+import { checkDocker, explainCompose, explainDocker } from './diagnose.js';
 
 export interface StackFiles {
   compose: string;
@@ -110,12 +111,44 @@ function sameDirectory(a: string, b: string): boolean {
   return norm(a) === norm(b);
 }
 
-function docker(args: string[], repoRoot: string): Promise<number> {
+interface DockerRun {
+  code: number;
+  /** Everything Docker wrote to stderr, kept so a failure can be translated. */
+  stderr: string;
+}
+
+/**
+ * Run Docker, showing its output live AND keeping a copy.
+ *
+ * stderr is teed rather than merely inherited. Compose writes its progress there,
+ * so swallowing it would leave a first-time user staring at nothing for the two
+ * minutes an image pull takes — but without a copy there is no text to
+ * translate when the thing fails. Both, therefore: the reader watches Docker work,
+ * and `diagnose.ts` still gets the words it needs afterwards.
+ */
+function docker(args: string[], repoRoot: string): Promise<DockerRun> {
   return new Promise((resolve) => {
-    const child = spawn('docker', args, { cwd: repoRoot, stdio: 'inherit', shell: false });
-    child.on('error', () => resolve(127)); // docker not installed
-    child.on('close', (code) => resolve(code ?? 1));
+    const child = spawn('docker', args, {
+      cwd: repoRoot,
+      stdio: ['ignore', 'inherit', 'pipe'],
+      shell: false,
+    });
+
+    let stderr = '';
+    child.stderr?.on('data', (chunk) => {
+      const text = String(chunk);
+      stderr += text;
+      process.stderr.write(text);
+    });
+
+    child.on('error', () => resolve({ code: 127, stderr: '' })); // docker not installed
+    child.on('close', (code) => resolve({ code: code ?? 1, stderr }));
   });
+}
+
+/** Print a block of explanation lines. */
+function report(lines: string[]): void {
+  for (const line of lines) console.error(line);
 }
 
 export async function up(repoRoot: string): Promise<number> {
@@ -161,13 +194,35 @@ export async function up(repoRoot: string): Promise<number> {
     console.log(`Restored ${TOKEN_FILE}.`);
   }
 
+  /**
+   * Ask Docker whether it is there before Compose does.
+   *
+   * Compose's answer to a stopped daemon is to name the pipe it could not open,
+   * which is accurate and useless — it never mentions Docker Desktop.
+   * Checking first turns the overwhelmingly common failure into an instruction,
+   * and costs one cheap `docker info` on the path where the database is down
+   * anyway. See stack/diagnose.ts.
+   */
+  const dockerStatus = await checkDocker();
+  if (dockerStatus.kind !== 'ok') {
+    report(explainDocker(dockerStatus));
+    return 1;
+  }
+
   console.log('Starting HydraDB and MinIO…\n');
-  const code = await docker(['compose', '-f', COMPOSE_FILE, 'up', '-d'], repoRoot);
+  const { code, stderr } = await docker(['compose', '-f', COMPOSE_FILE, 'up', '-d'], repoRoot);
   if (code === 127) {
-    console.error('\nDocker was not found on PATH. Ichor needs Docker to run HydraDB.\n');
+    report(explainDocker({ kind: 'missing' }));
     return code;
   }
-  if (code !== 0) return code;
+  if (code !== 0) {
+    // Compose has already streamed its own output. Add a reading of it when the
+    // failure is one we recognise, and add nothing when it is not.
+    const explained = explainCompose(stderr);
+    if (explained) report(explained);
+    else console.error('\nDocker could not start the stack — its output is above.\n');
+    return code;
+  }
 
   // Compose returns as soon as the containers are created. A listening port is
   // not proof of a working node — this waits for a query to round-trip.
@@ -246,9 +301,11 @@ export async function down(repoRoot: string, wipe: boolean): Promise<number> {
     );
   }
 
-  const code = await docker(args, repoRoot);
+  const { code, stderr } = await docker(args, repoRoot);
   if (code !== 0) {
-    console.error('\nDocker could not stop the stack. Nothing was wiped.\n');
+    const explained = code === 127 ? explainDocker({ kind: 'missing' }) : explainCompose(stderr);
+    if (explained) report(explained);
+    else console.error('\nDocker could not stop the stack. Nothing was wiped.\n');
     return code;
   }
 

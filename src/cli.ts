@@ -18,6 +18,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { GraphClient, configFromEnv } from './graph/client.js';
+import { explainFailure } from './errors.js';
 import { findAnchors } from './scope/anchors.js';
 import { buildNeighborhood } from './scope/neighborhood.js';
 import { saveTask, loadTask, clearTask, stateDir, writeAtomic } from './state.js';
@@ -384,7 +385,14 @@ program
     await runMcpServer(path.resolve(options.repo));
   });
 
-program.parseAsync(process.argv).catch((error: Error) => {
-  console.error(error.message);
+/**
+ * The one place an unhandled failure reaches a person.
+ *
+ * Printing `error.message` was fine for errors this codebase throws and useless
+ * for everything else, which is most of what lands here. See src/errors.ts.
+ */
+program.parseAsync(process.argv).catch((error: unknown) => {
+  for (const line of explainFailure(error)) console.error(line);
+  if (process.env.ICHOR_DEBUG === '1') console.error(error);
   process.exit(1);
 });

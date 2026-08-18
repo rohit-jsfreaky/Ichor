@@ -200,7 +200,7 @@ npm run up                    # HydraDB + MinIO via Docker
 npm run smoke                 # round-trips a real write; a listening port is not proof
 npm run build
 
-npm test                      # 178 unit tests
+npm test                      # 198 unit tests
 npm run check                 # 10 classification scenarios, incl. a mid-session job switch
 npm run session:test          # 12 cases a real session hits and nothing else tested
 npm run mcp:test              # 20 MCP protocol checks

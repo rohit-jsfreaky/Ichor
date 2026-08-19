@@ -64,7 +64,7 @@ true, one of the numbers is stale.
 
 | Suite | Count | Command | Verified |
 |---|---|---|---|
-| unit | 239 | `npm test` | ✅ 239 passed (19 Aug — 212, +18 for the 0.1.5 fixes, +9 for N1–N3) |
+| unit | 244 | `npm test` | ✅ 244 passed (19 Aug — 212, +18 for the 0.1.5 fixes, +9 for N1–N3, +5 for P2) |
 | classification scenarios | 10 | `npm run check` | ✅ 10/10 |
 | session harness | 12 | `npm run session:test` | ✅ 12 passed, 0 failed |
 | MCP protocol | 20 | `npm run mcp:test` | ⚠️ 20/20 in isolation — see below |
@@ -91,6 +91,15 @@ true, one of the numbers is stale.
 > after five other suites, then 20/20 on three consecutive runs in isolation.** So load, not the
 > number of projects, is the trigger — 16/20 is the worst observed so far, against the earlier
 > 18/20 at three projects.
+>
+> **19 Aug, papermark — the cost is now measured, and it is not a test problem.** The same error hit
+> the FIRST prompt of a live session, so no boundary was ever drawn and none existed to fall back
+> on. Ichor then allowed **30 edits and 22 shell commands without judging one of them**; the agent
+> changed 9 files and created 2 new modules unchallenged. Re-running the identical task with a
+> working boundary produced **5 files, 0 new modules, and one challenge the agent acted on**. It is
+> not deterministic (0 failures in 12 sequential draws) and six concurrent draws produced a
+> different failure — `EPERM … rename` on the atomic `task.json` write. Recorded as P2 in
+> `REGRESSION-0.2.1.md`.
 
 > **`mcp:test` and `multi:test` also fail on a database holding several projects**, and that is
 > a different thing from the flake above — it is reproducible, and it is the one-database-per-repo
@@ -233,6 +242,45 @@ npx tsx scripts/ground-truth.ts measure <repo>
 
 Then diff the output against this file, and this file against `README.md`, `web/index.html` and
 `web/docs.html`. Any disagreement is a bug in the prose, not in the table.
+
+---
+
+## 19 Aug — papermark, the first repository where the data layer exists
+
+Command: `ichor watch` on a fresh clone of mfts/papermark at `56815a7`, empty database.
+
+| | |
+|---|---|
+| files · functions | 1,379 · 3,472 |
+| routes | **69** |
+| models · fields | **78 · 1,213** |
+| `TOUCHES` edges | **1,198** |
+| calls · references · imports | 9,792 · 2,414 · 5,516 |
+| first index, empty database | **37.7s** |
+| merged declarations folded | 0 (`duplicateNames` 5) |
+
+Close to the earlier published figures (3,471 functions, 69 routes, 78 models, 1,213 fields) — the
+one extra function is a newer commit, not a change in extraction.
+
+**Route coverage is partial on this repo, and that was not known before.** Ichor extracted 69
+routes from 47 App Router files and **zero from 233 Pages Router API routes** — roughly 23% of the
+application's endpoints. papermark uses both routers. Recorded as P4 in `BUGS.md`; it bounds what
+`ichor paths` can answer here and it is not currently stated in the README.
+
+**This is the first target in four rounds with a usable data layer**, and therefore the first place
+test 2 could run at all. better-auth produced 0 `TOUCHES` from 12 models, dexto and opentui
+produced 0 routes. Stated plainly because it bounds every earlier round: the new-flow test was
+untested on real code until now.
+
+**Same task, with and without a working boundary** — the clearest measurement of what the product
+is worth, and it came from a failure rather than a design:
+
+| | boundary failed (P2) | boundary working |
+|---|---|---|
+| files changed | 9 | **5** |
+| new modules | 2 | **0** |
+| edits judged | 0 of 30 | all |
+| agent changed course after a challenge | — | **yes** |
 
 ---
 

@@ -269,11 +269,33 @@ export async function writeGraph(
     props: ['render', 'contains'],
   });
 
+  /**
+   * `write` says whether this function CHANGES the model, not merely reads it.
+   *
+   * The extractor has always known — `TouchEdge.isWrite` — and it was never
+   * persisted, so the graph could not tell `prisma.link.create()` from
+   * `prisma.link.findMany()`. That mattered in exactly one place and it is the
+   * flagship one: test 2 argues *"the existing path already enforces this
+   * constraint"*, and a constraint is enforced where the data is WRITTEN. Without
+   * this the argument was made from whichever route sorted first alphabetically,
+   * and on a real repository that was an AI-chat citation resolver that only reads
+   * Link. See `findDuplicateFlow`.
+   *
+   * Written on every row, never left absent, for the same reason `render` is: this
+   * engine cannot ask for a property that some rows lack.
+   */
   groups.push({
     label: 'TOUCHES',
     from: 'Function',
     to: 'Model',
-    rows: facts.touches.map((t) => edgeRow('TOUCHES', t.fromKey, t.modelKey)),
+    rows: facts.touches.map((t) => ({
+      ...edgeRow('TOUCHES', t.fromKey, t.modelKey),
+      write: t.isWrite === true,
+    })),
+    props: ['write'],
+    // A function that both reads and writes one model produces two facts with one
+    // edge id. It is a writer. See `dedupe`.
+    anyOf: ['write'],
   });
 
   groups.push({
@@ -578,6 +600,8 @@ interface EdgeGroupRows {
    * owner for what an edge carries.
    */
   props?: string[];
+  /** Properties merged with OR rather than AND when two rows share an edge id. */
+  anyOf?: string[];
 }
 
 /**
@@ -605,7 +629,18 @@ function dedupe(group: EdgeGroupRows): EdgeGroupRows {
       continue;
     }
     for (const prop of group.props ?? []) {
-      seen[prop] = Boolean(seen[prop]) && Boolean(row[prop]);
+      /**
+       * AND by default, OR where the group says so.
+       *
+       * AND is right for `render` and `contains`: a target that is both rendered
+       * and called plainly is a real dependency, so the weaker reading loses. It
+       * is exactly wrong for `write` — a function that reads a model somewhere and
+       * writes it somewhere else IS a writer, and collapsing to `false` would hide
+       * the one fact test 2 needs.
+       */
+      seen[prop] = group.anyOf?.includes(prop)
+        ? Boolean(seen[prop]) || Boolean(row[prop])
+        : Boolean(seen[prop]) && Boolean(row[prop]);
     }
   }
   return byId.size === group.rows.length ? group : { ...group, rows: [...byId.values()] };

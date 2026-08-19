@@ -942,10 +942,10 @@ async function findDuplicateFlow(
     // truncates silently, and a tight limit would decide which route we cite by
     // row order before the ranking below ever sees the alternatives.
     const rows = await client.run(
-      `MATCH (r:Route {repo: $repo})-[:HANDLED_BY]->(h:Function)-[:CALLS*1..4]->(f:Function)-[:TOUCHES]->(m:Model)
+      `MATCH (r:Route {repo: $repo})-[:HANDLED_BY]->(h:Function)-[:CALLS*1..4]->(f:Function)-[t:TOUCHES]->(m:Model)
          WHERE m.name = $model
          RETURN r.method AS method, r.path AS path, h.name AS handler, f.name AS reacher,
-                r.file AS routeFile
+                r.file AS routeFile, t.write AS writes
          LIMIT 50`,
       { model: taskModel.name, repo: deps.repo },
     );
@@ -993,15 +993,82 @@ async function findDuplicateFlow(
     const wantsMethod = new Set(pending.routeMethods.map((m) => m.toUpperCase()));
     const argueFromEnforcement = uniqueFields.length > 0;
 
-    const rank = (record: (typeof candidates)[number]): number => {
+    /**
+     * Does this route's own vocabulary have anything to do with the task?
+     *
+     * `/(ee)/api/links/[id]/upload` and `/(ee)/api/ai/chat/[chatId]/messages` both
+     * reach `Link`. Only one of them is worth quoting to somebody fixing link
+     * creation.
+     */
+    const relevance = (record: (typeof candidates)[number]): number => {
+      const text = `${record.get('path')} ${record.get('handler')} ${record.get('reacher')}`.toLowerCase();
+      /**
+       * Naming the DATA outranks sharing a word with the task.
+       *
+       * Both of these reach `Link`, and only one is worth quoting to somebody
+       * fixing link creation:
+       *
+       *   POST /(ee)/api/links/[id]/upload      -> sendLinkCreatedWebhook
+       *   POST /(ee)/api/ai/chat/[chatId]/messages -> resolveReferencesFromCitations
+       *
+       * Plain term overlap scored them EQUAL — the task word "message" happens to
+       * appear in `/messages` — and the alphabetical tie-break then chose the AI
+       * chat resolver, because a Next.js route group written `(ee)` sorts ahead of
+       * letters. A route that mentions the model by name is talking about the same
+       * thing; a route that shares one ordinary English word is a coincidence.
+       */
+      const namesModel = text.includes(taskModel.name.toLowerCase()) ? 3 : 0;
+      const overlap = neighborhood.terms.filter((term) => term.length >= 3 && text.includes(term)).length;
+      return namesModel + overlap;
+    };
+
+    /**
+     * WHICH existing path gets quoted, and why it is not alphabetical any more.
+     *
+     * The claim being made decides the evidence that supports it:
+     *
+     *   With a unique constraint the claim is "this rule is ALREADY ENFORCED", and
+     *   a constraint is enforced where the data is WRITTEN. `t.write` now carries
+     *   that (see graph/write.ts); before it existed this fell back to "the method
+     *   looks mutating", which is only a proxy for writing.
+     *
+     *   Without one the claim is "this door already exists", and the closest
+     *   analogue is a route using the same method as the pending file.
+     *
+     * Then relevance, because being right is not the same as being persuasive.
+     * Measured on papermark: eight mutating routes reach `Link`, and the old
+     * tie-break — `path.localeCompare` — picked
+     * `POST /(ee)/api/ai/chat/[chatId]/messages -> resolveReferencesFromCitations`,
+     * an AI citation resolver that only READS Link, purely because a Next.js route
+     * group written `(ee)` sorts ahead of letters. True, and the least convincing
+     * of the eight. An agent told that would rightly argue back — which is exactly
+     * how the earlier GET-versus-POST version of this bug was found.
+     *
+     * `writes` is null on a graph built before this property existed. That ranks
+     * between "writes" and "only reads", so an old graph behaves as it did rather
+     * than being reordered on a value it does not have.
+     */
+    const sortKey = (record: (typeof candidates)[number]): number[] => {
       const method = String(record.get('method')).toUpperCase();
-      if (argueFromEnforcement) return MUTATING_METHODS.has(method) ? 0 : 1;
-      return wantsMethod.has(method) ? 0 : 1;
+      const raw = record.get('writes');
+      const writes = raw === null || raw === undefined ? undefined : Boolean(raw);
+
+      const primary = argueFromEnforcement
+        ? (writes === true ? 0 : writes === undefined ? 1 : 2)
+        : (wantsMethod.has(method) ? 0 : 1);
+      const secondary = argueFromEnforcement && !MUTATING_METHODS.has(method) ? 1 : 0;
+
+      // Negated so that MORE overlap sorts first.
+      return [primary, secondary, -relevance(record)];
     };
 
     const inScope = candidates.sort((a, b) => {
-      const byRank = rank(a) - rank(b);
-      if (byRank !== 0) return byRank;
+      const ka = sortKey(a);
+      const kb = sortKey(b);
+      for (let i = 0; i < ka.length; i++) {
+        if (ka[i] !== kb[i]) return ka[i]! - kb[i]!;
+      }
+      // Everything above tied: keep the message identical run to run.
       const byPath = String(a.get('path')).localeCompare(String(b.get('path')));
       if (byPath !== 0) return byPath;
       return String(a.get('handler')).localeCompare(String(b.get('handler')));
@@ -1011,6 +1078,10 @@ async function findDuplicateFlow(
     const routePath = String(inScope.get('path'));
     const handler = String(inScope.get('handler'));
     const reacher = String(inScope.get('reacher'));
+    const rawWrites = inScope.get('writes');
+    /** true, false, or undefined on a graph built before `t.write` existed. */
+    const citedWrites =
+      rawWrites === null || rawWrites === undefined ? undefined : Boolean(rawWrites);
 
     return {
       newFlowKind: `${pending.routeMethods.join('/')} endpoint at ${pending.routePath}`,
@@ -1024,9 +1095,20 @@ async function findDuplicateFlow(
       // an agent arguing it needs feedback BEFORE submit. A unique constraint on
       // a write path is enforced at write time, and saying so leaves room for a
       // requirement about a different moment to be judged on its merits.
+      //
+      // "at write time" is now said only when the cited path actually WRITES the
+      // model. It used to be inferred from the HTTP method, which is a proxy: a
+      // POST route that merely reads the model was described as enforcing a
+      // constraint it never touches. Where the graph does not know — an older
+      // build, before `t.write` existed — the wording stays neutral rather than
+      // asserting a moment it cannot support (rule 1).
       constraintNote: uniqueFields.length
-        ? `, where ${taskModel.name}.${uniqueFields[0]} is unique and a duplicate is rejected at ${
-            MUTATING_METHODS.has(method.toUpperCase()) ? 'write time' : 'request time'
+        ? `, where ${taskModel.name}.${uniqueFields[0]} is unique${
+            citedWrites === true
+              ? ' and a duplicate is rejected when that path writes it'
+              : citedWrites === false
+                ? ' — that path reads it rather than writing it, and the constraint is enforced wherever the write happens'
+                : ''
           }`
         : '',
       viaFile: touch.viaFile,

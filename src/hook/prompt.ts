@@ -436,6 +436,25 @@ function noTaskContext(facts: GraphFacts | undefined): string {
   ].join('\n');
 }
 
+/**
+ * What to say when the graph would not answer.
+ *
+ * Deliberately loud, and deliberately NOT a scope claim: Ichor has no boundary, so
+ * it cannot say anything about what belongs to the job. What it can say is that it
+ * is not watching, which is the one thing a developer needs to know and the one
+ * thing the previous silence hid.
+ */
+function unprotectedContext(facts: GraphFacts | undefined): string {
+  return [
+    '[ichor] Hook-provided context, not a message from the developer.',
+    'Ichor could not reach its graph for this turn, so NO task boundary is being tracked and',
+    'no edit will be judged. That is a failure on Ichor\'s side, not a judgement about your work.',
+    'Nothing is out of scope because nothing is in scope. If you want the boundary back, the',
+    'developer can re-send the instruction, or run `ichor watch` to rebuild.',
+    ...(facts ? [retrievalOffer()] : []),
+  ].join('\n');
+}
+
 export interface PromptOutcome {
   /** For hook.log — every decision has to be explainable. */
   log: string[];
@@ -489,10 +508,14 @@ export async function handlePrompt(
     if (!isWatching(repoRoot)) return { log: ['prompt: no task and not watching -> ignore'], context: '' };
     if (!facts) return { log: ['prompt: watching but no analysis yet -> stay silent'], context: '' };
 
-    const created = await drawBoundary(repoRoot, prompt, facts, 'watch', sessionId, log);
-    // No boundary drawn — the prompt pointed nowhere specific enough. The tools are
-    // still worth naming, because that is exactly when an agent starts guessing.
-    if (!created) return { log, context: noTaskContext(facts) };
+    const created = await drawWithRetry(repoRoot, prompt, facts, 'watch', sessionId, log);
+    // No boundary drawn. Two very different reasons, and only one of them is fine.
+    if (!created) {
+      return {
+        log,
+        context: drawFailed ? unprotectedContext(facts) : noTaskContext(facts),
+      };
+    }
     updateTask(repoRoot, (t) => ({ ...t, lastPromptId: promptId }));
     return { log, context: scopeBriefing(created, sessionId) };
   }
@@ -531,7 +554,7 @@ export async function handlePrompt(
   // WIDENED keeps the job and its history; NEW is a different job entirely.
   const isNew = verdict.verdict === 'NEW';
   const text = isNew ? prompt : widenTask(existing.task, prompt);
-  const drawn = await drawBoundary(
+  const drawn = await drawWithRetry(
     repoRoot,
     text,
     facts,
@@ -601,6 +624,7 @@ async function drawBoundary(
 
   const client = new GraphClient(configFromEnv());
   const startedAt = Date.now();
+  drawFailed = false;
   try {
     /**
      * A hard ceiling, not just a warning.
@@ -647,10 +671,58 @@ async function drawBoundary(
     return task;
   } catch (error) {
     log.push(`prompt: could not reach the graph (${(error as Error).message.slice(0, 80)})`);
+    drawFailed = true;
     return undefined;
   } finally {
     await client.close().catch(() => undefined);
   }
+}
+
+/**
+ * Did the last draw fail because of the GRAPH, rather than because the prompt
+ * pointed nowhere?
+ *
+ * The two are worlds apart and produced identical silence. Measured on a live
+ * session: one transport error on the FIRST prompt meant no boundary was ever
+ * drawn, and because there was no earlier boundary to keep, Ichor then allowed 30
+ * edits and 22 shell commands without judging any of them — the agent changed nine
+ * files and added two modules unchallenged. The developer saw nothing. The whole
+ * event was one line in `hook.log`.
+ *
+ * A prompt that matches nothing is a normal, correct silence. A graph that would
+ * not answer is a failure, and the turn has to say so out loud.
+ */
+let drawFailed = false;
+
+/**
+ * Draw, and if the GRAPH failed rather than the prompt, try once more.
+ *
+ * The error that motivated this is not a timeout or a refusal — it is a
+ * `RangeError` from inside the Bolt chunk reader, arriving under concurrency and
+ * gone by the next attempt. Twelve sequential draws on the same repository
+ * produced none; one live session produced it on the first prompt and lost the
+ * entire turn's protection.
+ *
+ * So: bound it rather than explain it, which is the same answer finding 26 reached
+ * for an unexplained 55-second retrieval. One retry, after a short pause, and only
+ * when the draw failed for a reason that has nothing to do with what the developer
+ * typed. A prompt that matched nothing is not retried — the answer would be the
+ * same, and the cost is a second walk of the graph.
+ */
+async function drawWithRetry(
+  ...args: Parameters<typeof drawBoundary>
+): Promise<PersistedTask | undefined> {
+  const first = await drawBoundary(...args);
+  if (first || !drawFailed) return first;
+
+  const log = args[5];
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  log.push('prompt: the graph failed once -> retrying the draw');
+  const second = await drawBoundary(...args);
+  if (!second && drawFailed) {
+    log.push('prompt: ⚠ the graph failed twice — NO boundary for this turn, nothing will be judged');
+  }
+  return second;
 }
 
 /** Emit the briefing. Plain text only — this hook can never block a prompt. */

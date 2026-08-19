@@ -448,9 +448,21 @@ export async function runTool(
         }
         if (verdict.question) lines.push('', verdict.question);
         if (isChallenge(verdict)) {
+          /**
+           * Name the door that is open.
+           *
+           * This said "call ichor_request_scope_expansion" — advice a reader coming
+           * from a shell cannot act on, and advice the AGENT cannot act on either
+           * until the workspace is trusted, which is the default for a fresh clone.
+           * The hook's challenge text was corrected for that; these verdicts were
+           * missed. Both routes are named now, shell first, because it is the one
+           * that always works.
+           */
           lines.push(
             '',
-            'If this is genuinely required, call ichor_request_scope_expansion with your reason.',
+            `If this is genuinely required, say why and have it weighed against the graph:`,
+            `  ichor justify ${file} "<why the task needs it>"`,
+            '(or the ichor_request_scope_expansion tool, where MCP tools are permitted)',
           );
         }
         return lines.join('\n');
@@ -472,7 +484,8 @@ export async function runTool(
           `The task works on: ${task.coreModels.join(', ') || '(no models)'}`,
           '',
           'That is why an edit here is treated as scope expansion. If the task genuinely requires it,',
-          'call ichor_request_scope_expansion and say why.',
+          `say why: ichor justify ${file} "<why the task needs it>"`,
+          '(or the ichor_request_scope_expansion tool, where MCP tools are permitted)',
         ].join('\n');
       }
 

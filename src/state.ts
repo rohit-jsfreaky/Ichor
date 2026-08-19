@@ -139,7 +139,45 @@ export function writeAtomic(file: string, contents: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(temp, contents, 'utf8');
-  fs.renameSync(temp, file);
+
+  /**
+   * Rename can fail on Windows even when nothing is wrong.
+   *
+   * `rename` is atomic on POSIX and merely *usually* atomic on NTFS: if any other
+   * process holds a handle on the destination for an instant — another hook, a
+   * virus scanner, the search indexer — the call fails with EPERM or EBUSY rather
+   * than waiting. Reproduced by firing six hooks at once, where three boundary
+   * draws died with `EPERM: operation not permitted, rename …` and the turn was
+   * left with no boundary at all.
+   *
+   * Several hooks genuinely do run at once: a PostToolUse gate can overlap a
+   * prompt's draw and a detached rebuild. So a few short retries, and only then a
+   * throw — losing a boundary because a scanner looked at the file for 3ms is not
+   * a real failure, and pretending otherwise costs the whole turn's protection.
+   */
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.renameSync(temp, file);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt >= 4 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) {
+        // Never leave the temp file behind for a failure we are not retrying.
+        try {
+          fs.rmSync(temp, { force: true });
+        } catch {
+          /* the write already failed; this is tidying, not recovery */
+        }
+        throw error;
+      }
+      // Busy-wait briefly. This is synchronous on purpose — every caller is, and
+      // making it async would change the shape of the hook's hot path.
+      const until = Date.now() + 20 * (attempt + 1);
+      while (Date.now() < until) {
+        /* spin */
+      }
+    }
+  }
 }
 
 function writeTask(repoRoot: string, task: PersistedTask): void {

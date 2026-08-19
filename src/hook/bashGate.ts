@@ -38,7 +38,7 @@ import * as path from 'node:path';
 
 import { GraphClient, configFromEnv } from '../graph/client.js';
 import { repoIdFor } from '../ids.js';
-import { gitChangedEntries } from '../refresh/refresh.js';
+import { gitChangedEntries, isAnalysedPath } from '../refresh/refresh.js';
 import { refreshInProgress } from '../refresh/refresh.js';
 import { classify, isChallenge, type Verdict } from '../scope/classify.js';
 import { parsePending } from '../scope/pending.js';
@@ -127,6 +127,21 @@ export interface DiskChange {
 export interface Detection {
   /** Changes that still need a verdict. */
   candidates: DiskChange[];
+  /**
+   * Changed files Ichor cannot read, and therefore can never challenge.
+   *
+   * Held apart from `candidates` because the gate's job is to decide whether to
+   * speak, and for these the answer is fixed: `classify` can only return
+   * `NOT_JUDGED` or `CONNECTED` for a file type the analyser does not parse, and
+   * both are silent. Running them through the classifier would cost a graph query
+   * each — on a repo with a few hundred untracked files, a few hundred round trips
+   * per shell command — to reach a foregone conclusion.
+   *
+   * They are still RECORDED, which is the whole point of collecting them: until
+   * now a `.md` written by a heredoc was invisible to the gate AND to the
+   * end-of-turn report, so nobody could tell it had happened.
+   */
+  unreadable: string[];
   /** Files that are gone. Recorded, never challenged — you cannot argue with a delete. */
   deletes: string[];
   /** Files already challenged that were written again: the agent pushing through. */
@@ -149,6 +164,7 @@ export function detectBashChanges(
 ): Detection {
   const since = Date.parse(task.startedAt);
   const candidates: DiskChange[] = [];
+  const unreadable: string[] = [];
   const deletes: string[] = [];
   const forced: string[] = [];
   const skipped: string[] = [];
@@ -208,6 +224,14 @@ export function detectBashChanges(
     const seen = gate.seen[rel];
     if (seen && seen.mtimeMs === stat.mtimeMs && seen.size === stat.size) continue;
 
+    // A file type Ichor does not read can never be challenged, so it needs no
+    // verdict — only a record that it changed.
+    if (!isAnalysedPath(rel)) {
+      gate.seen[rel] = { mtimeMs: stat.mtimeMs, size: stat.size };
+      unreadable.push(rel);
+      continue;
+    }
+
     candidates.push({
       file: rel,
       operation: entry.status.includes('?') ? 'create' : 'edit',
@@ -216,7 +240,7 @@ export function detectBashChanges(
     });
   }
 
-  return { candidates, deletes, forced, skipped };
+  return { candidates, unreadable, deletes, forced, skipped };
 }
 
 export interface GateOutcome {
@@ -239,7 +263,20 @@ export interface GateOutcome {
 export async function judgeBashChanges(repoRoot: string): Promise<GateOutcome> {
   const log: string[] = [];
   const task = loadTask(repoRoot);
-  if (!task) return { log: [] };
+  /**
+   * Say WHY, even when the answer is "nothing to do".
+   *
+   * This returned an empty log, so the caller wrote the `--- PostToolUse Bash`
+   * header and then nothing at all. In a live session that header sat 27 seconds
+   * ahead of the next line, which is indistinguishable from a hook that hung or
+   * crashed — and `hook/run.ts` keeps this log precisely so that *"why did Ichor
+   * say nothing?"* is always answerable after the fact. For shell writes with no
+   * task open it was not answerable.
+   *
+   * The editing path has always said `no active task -> allow`. This is the same
+   * sentence for the same condition.
+   */
+  if (!task) return { log: ['post: no active task -> nothing to judge'] };
 
   const started = Date.now();
   const gate = loadGateState(repoRoot, task);
@@ -266,6 +303,24 @@ export async function judgeBashChanges(repoRoot: string): Promise<GateOutcome> {
     );
     markJudged(repoRoot, found.deletes);
     log.push(`post: recorded ${found.deletes.length} deletion(s)`);
+  }
+
+  /**
+   * Files Ichor cannot read: recorded, never challenged.
+   *
+   * Marked judged so the end-of-turn report does not name them as edits Ichor
+   * never saw — it DID see them, it simply has no basis to judge them, which is
+   * the same answer the editing path gives for a `.md` (`NOT_JUDGED`). Aggregated
+   * into one log line rather than one per file, because a build step can touch
+   * dozens and the log has to stay readable.
+   */
+  if (found.unreadable.length > 0) {
+    markJudged(repoRoot, found.unreadable);
+    const shown = found.unreadable.slice(0, 3).join(', ');
+    log.push(
+      `post: ${found.unreadable.length} change(s) in file types Ichor does not read ` +
+        `-> recorded, not judged (${shown}${found.unreadable.length > 3 ? ', …' : ''})`,
+    );
   }
 
   // THE COMMON CASE. A shell command that changed no source file costs one git

@@ -247,3 +247,71 @@ describe('a file the task named outright', () => {
     expect(taskNamesFile('tidy up index.ts', 'src/index.ts')).toBe(false);
   });
 });
+
+/**
+ * A file Ichor cannot read, written by the shell.
+ *
+ * Found live: the agent created a `.md` with a heredoc, the gate ran twice after
+ * the file existed and said "nothing new to judge" both times, and the end-of-turn
+ * unseen-edit report never named it either. The same file through the Write tool
+ * was judged `NOT_JUDGED`/`CONNECTED` and recorded — two write paths giving two
+ * different amounts of truth about one change.
+ *
+ * The cause was a file-type filter inside `gitChangedEntries`, which ran before
+ * anything could look at the change. Detection now sees every path and the callers
+ * that only care about analysable code filter for themselves.
+ */
+describe('changes Ichor cannot read', () => {
+  it('detects a non-TypeScript file written by the shell', () => {
+    saveTask(repo, neighborhood('document the parser'));
+    shellWrite('notes/parser-notes.md', '# notes\n');
+
+    const task = loadTask(repo)!;
+    const found = detectBashChanges(repo, task, loadGateState(repo, task));
+
+    // Not a candidate for a verdict — it can never be challenged — but seen.
+    expect(found.unreadable).toContain('notes/parser-notes.md');
+    expect(found.candidates.map((c) => c.file)).not.toContain('notes/parser-notes.md');
+  });
+
+  it('still routes TypeScript to the classifier', () => {
+    saveTask(repo, neighborhood('document the parser'));
+    shellWrite('src/written-by-a-shell.ts');
+
+    const task = loadTask(repo)!;
+    const found = detectBashChanges(repo, task, loadGateState(repo, task));
+
+    expect(found.candidates.map((c) => c.file)).toContain('src/written-by-a-shell.ts');
+    expect(found.unreadable).not.toContain('src/written-by-a-shell.ts');
+  });
+
+  it('does not report the same unreadable file twice', () => {
+    // The high-water mark has to cover these too, or every later shell command in
+    // the task re-reports a README that has not changed since.
+    saveTask(repo, neighborhood('document the parser'));
+    shellWrite('notes/parser-notes.md', '# notes\n');
+
+    const task = loadTask(repo)!;
+    const gate = loadGateState(repo, task);
+    expect(detectBashChanges(repo, task, gate).unreadable).toContain('notes/parser-notes.md');
+    saveGateState(repo, gate);
+
+    const again = detectBashChanges(repo, task, loadGateState(repo, task));
+    expect(again.unreadable).toEqual([]);
+  });
+
+  it('never reports Ichor\'s own state directory', () => {
+    // `.ichor/` is gitignored by `ichor init`, but correctness must not depend on
+    // the user's ignore file — otherwise Ichor names its own bookkeeping as an
+    // edit it never judged, at the end of every turn.
+    saveTask(repo, neighborhood('document the parser'));
+    shellWrite('src/real-change.ts');
+
+    const task = loadTask(repo)!;
+    const found = detectBashChanges(repo, task, loadGateState(repo, task));
+    const everything = [...found.candidates.map((c) => c.file), ...found.unreadable];
+
+    expect(everything.some((f) => f.startsWith('.ichor'))).toBe(false);
+    expect(everything).toContain('src/real-change.ts');
+  });
+});

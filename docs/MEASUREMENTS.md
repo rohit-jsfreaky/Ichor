@@ -64,7 +64,7 @@ true, one of the numbers is stale.
 
 | Suite | Count | Command | Verified |
 |---|---|---|---|
-| unit | 230 | `npm test` | ✅ 230 passed (19 Aug — 212 + 18 for the regression fixes) |
+| unit | 239 | `npm test` | ✅ 239 passed (19 Aug — 212, +18 for the 0.1.5 fixes, +9 for N1–N3) |
 | classification scenarios | 10 | `npm run check` | ✅ 10/10 |
 | session harness | 12 | `npm run session:test` | ✅ 12 passed, 0 failed |
 | MCP protocol | 20 | `npm run mcp:test` | ⚠️ 20/20 in isolation — see below |
@@ -79,6 +79,18 @@ true, one of the numbers is stale.
 > partial-chunk read in the stdio framing — the code assumes a length header arrives whole, and
 > under load the chunk boundary lands mid-header. **Open bug.** It does not reproduce in
 > isolation, which is exactly why it is written down here.
+>
+> **19 Aug — that attribution is wrong.** The same `RangeError` appeared in a live session inside a
+> BOUNDARY DRAW, nowhere near the MCP server: `prompt: could not reach the graph (The value of
+> "offset" is out of range … Received 4)`. The classification succeeded and the graph query failed,
+> which puts the fault in the Bolt chunk handling both paths share, not in MCP stdio framing. It is
+> therefore not only a flaky test: it silently costs a boundary redraw in ordinary use, leaving the
+> boundary stale so the next edit is challenged for it. Recorded as N4 in `BUGS.md`.
+>
+> Fresh data from the same session, with TWO projects in the database: **16/20 when run immediately
+> after five other suites, then 20/20 on three consecutive runs in isolation.** So load, not the
+> number of projects, is the trigger — 16/20 is the worst observed so far, against the earlier
+> 18/20 at three projects.
 
 > **`mcp:test` and `multi:test` also fail on a database holding several projects**, and that is
 > a different thing from the flake above — it is reproducible, and it is the one-database-per-repo

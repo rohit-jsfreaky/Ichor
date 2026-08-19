@@ -169,8 +169,61 @@ export interface PromptClassification {
    * does not get averaged in with one. See `namedTokens`.
    */
   namedOutside: string[];
+  /**
+   * Terms that name a DIRECTORY the repository actually has, outside the boundary.
+   *
+   * Weaker evidence than `namedOutside` and treated as such — see `areaSegments`.
+   */
+  areaHits: string[];
   /** One line for hook.log. Every verdict must be explainable. */
   reason: string;
+}
+
+/**
+ * Every directory name in the repository, as words.
+ *
+ * WHY THIS EXISTS.
+ *
+ * The focused-term rule asks how FEW places a word lands in, and that works when
+ * the subject of a sentence is a file or a symbol. It inverts when the subject is
+ * a directory. Measured on a 890-file monorepo organised by package:
+ *
+ *     keymap     126 places   <- the subject of "the keymap parser needs a comment"
+ *     parser      34
+ *     sequences   32
+ *     key        197
+ *
+ * `keymap` matches the path of every file under `packages/keymap/`, so the word
+ * that most precisely names the job is the WIDEST term in the prompt. Nothing
+ * cleared the bar, the prompt read as noise, and Ichor went on policing the
+ * previous task — the same failure the focused-term rule was written to fix,
+ * surviving in a shape it does not cover. Two of five prose phrasings worked on
+ * that repository, against six of six on one organised by file.
+ *
+ * A threshold cannot separate these: `keymap` spans 5 top-level areas and `doc` —
+ * genuinely generic — spans 8. Measured on both repositories, no cut-off sits
+ * between them that does not also break the other. So this is not a threshold at
+ * all: **either the repository has a directory of that name or it does not.** That
+ * is the same kind of evidence as a path the developer typed, which is the
+ * principle the named-outright override already rests on.
+ *
+ * Segments are split on `-`, `_` and `.` so `rate-limiter` answers to both "rate"
+ * and "limiter", and `audio-stream` to "audio". STRUCTURAL words are filtered out
+ * before this is consulted, so `src`, `lib` and `packages` cannot match.
+ */
+function areaSegments(index: NameIndex): Set<string> {
+  const segments = new Set<string>();
+  for (const entry of index.entries) {
+    if (!entry.file) continue;
+    const parts = entry.file.split('/');
+    parts.pop(); // the filename is not a directory
+    for (const part of parts) {
+      for (const word of part.split(/[-_.]/)) {
+        if (word.length >= 3) segments.add(word.toLowerCase());
+      }
+    }
+  }
+  return segments;
 }
 
 /**
@@ -230,6 +283,41 @@ function isInside(entry: IndexEntry, boundary: BoundaryView): boolean {
 }
 
 /**
+ * Is the boundary already about a directory of this name?
+ *
+ * Without this, a term naming the very area being worked on reads as a move to
+ * somewhere else — "the cookie chunking" would "name the cookies directory" and
+ * widen into what it is already inside. Checked against the boundary's CORE files
+ * for the same reason `isCoreFile` exists: a directory the walk merely passed
+ * through is not what the job is about.
+ */
+function namesBoundaryArea(term: string, boundary: BoundaryView): boolean {
+  const core = boundary.coreFiles ?? boundary.files;
+  if (core.length === 0) return false;
+
+  const under = core.filter((file) => {
+    const parts = file.toLowerCase().split('/');
+    parts.pop();
+    return parts.some((part) => part.split(/[-_.]/).includes(term));
+  }).length;
+
+  /**
+   * A MAJORITY, not a single file — and that distinction was found by measurement.
+   *
+   * `some()` looked right and was far too strong. A task about the edit buffer
+   * anchored, among 26 core files, one called
+   * `packages/keymap/src/addons/opentui/edit-buffer-bindings.ts` — because it is
+   * genuinely about edit buffers. That one incidental file sits under
+   * `packages/keymap/`, so "keymap" counted as the boundary's own area and the
+   * whole signal was suppressed: the prompt *"different job now, the keymap
+   * parser…"* was still filed as noise.
+   *
+   * One file in twenty-six is not what a job is about. Half of them is.
+   */
+  return under * 2 >= core.length;
+}
+
+/**
  * Is the boundary ABOUT this file, rather than merely touching it?
  *
  * Used only for things the prompt named outright — see `BoundaryView.coreFiles`.
@@ -279,6 +367,12 @@ export function classifyPrompt(
    * answers "why did Ichor do that" is its own kind of wrong.
    */
   const focusedPlaces = new Map<string, number>();
+  /**
+   * Terms that name a directory the repository has, and that the boundary is not
+   * already about. See `areaSegments`.
+   */
+  const areaHits: string[] = [];
+  const segments = areaSegments(index);
 
   for (const term of terms) {
     let insideCount = 0;
@@ -315,6 +409,10 @@ export function classifyPrompt(
         focusedOutside.push(term);
         focusedPlaces.set(term, places.size);
         for (const f of places) focusedFiles.add(f);
+      } else if (segments.has(term) && !namesBoundaryArea(term, boundary)) {
+        // Too wide to be "focused", but it is the name of a real directory the
+        // boundary is not about — the developer naming a place.
+        areaHits.push(term);
       }
       for (const f of filesForTerm) outsideFiles.add(f);
       continue;
@@ -351,7 +449,7 @@ export function classifyPrompt(
   }
 
   const spread = [...outsideFiles];
-  const base = { terms, insideHits, outsideHits, outsideFiles: spread, namedOutside };
+  const base = { terms, insideHits, outsideHits, outsideFiles: spread, namedOutside, areaHits };
 
   /**
    * A handful of named things survives the spread guard. A wall of them does not.
@@ -395,6 +493,33 @@ export function classifyPrompt(
       reason:
         `names ${namedOutside.slice(0, 3).join(', ')} outright, which the boundary does not cover` +
         (insideHits.length ? ` (still inside: ${insideHits.slice(0, 3).join(', ')})` : ''),
+    };
+  }
+
+  /**
+   * A directory the developer named, when nothing was named outright.
+   *
+   * ALWAYS WIDENED, NEVER NEW, and that asymmetry is the safety in this rule. A
+   * path or an identifier is unambiguous, so it may replace the boundary. A bare
+   * word that happens to coincide with a directory name is not — `copy` is an
+   * ordinary English word and also a directory in some repositories. Widening adds
+   * the new area while KEEPING everything already in scope, so a coincidence costs
+   * a boundary that is too broad, which challenges less (rule 1a). Replacing would
+   * throw away the real task, which is the expensive mistake.
+   *
+   * Suppressed for a PASTE, exactly as the named-outright override is. A stack
+   * trace mentions directory names in every frame, and a test caught this the
+   * moment the rule was added: ten pasted paths under `backend/` widened the
+   * boundary on the strength of the word "backend". A paste is noise whatever
+   * shape its words happen to have.
+   */
+  if (areaHits.length > 0 && !pasted) {
+    return {
+      ...base,
+      verdict: 'WIDENED',
+      reason:
+        `names ${areaHits.slice(0, 3).join(', ')}, which ${areaHits.length === 1 ? 'is a directory' : 'are directories'} ` +
+        `outside the boundary`,
     };
   }
 

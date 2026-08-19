@@ -504,3 +504,95 @@ describe('a named symbol outranks scattered words', () => {
     expect(verdict.verdict).not.toBe('NEW');
   });
 });
+
+/**
+ * A directory the developer named.
+ *
+ * The focused-term rule asks how FEW places a word lands in, which works when the
+ * subject is a file and inverts when it is a directory: on a package-organised
+ * monorepo, `keymap` matched the path of all 126 files under `packages/keymap/`,
+ * so the word naming the job was the widest term in the sentence. Two of five
+ * prose phrasings moved the boundary there, against six of six on a repo organised
+ * by file.
+ *
+ * No threshold separates those cases — measured on both repositories, `keymap`
+ * spans 5 top-level areas and a genuinely generic `doc` spans 8. So this is not a
+ * threshold: either the repo has a directory of that name or it does not.
+ */
+describe('naming a directory', () => {
+  /** A package-organised index, the shape that broke the focused-term rule. */
+  const packagedIndex = buildNameIndex(
+    {
+      functions: [
+        ...Array.from({ length: 30 }, (_, i) => ({
+          key: `f${i}`, name: `keymapThing${i}`, file: `packages/keymap/src/part${i}/impl.ts`,
+          line: 1, exported: true, isComponent: false, isTest: false,
+        })),
+        ...Array.from({ length: 30 }, (_, i) => ({
+          key: `g${i}`, name: `audioThing${i}`, file: `packages/audio-stream/src/part${i}/impl.ts`,
+          line: 1, exported: true, isComponent: false, isTest: false,
+        })),
+        { key: 'e1', name: 'editBuffer', file: 'packages/core/src/edit-buffer.ts',
+          line: 1, exported: true, isComponent: false, isTest: false },
+      ],
+      files: [
+        ...Array.from({ length: 30 }, (_, i) => ({ key: `pf${i}`, path: `packages/keymap/src/part${i}/impl.ts` })),
+        ...Array.from({ length: 30 }, (_, i) => ({ key: `af${i}`, path: `packages/audio-stream/src/part${i}/impl.ts` })),
+        { key: 'ef', path: 'packages/core/src/edit-buffer.ts' },
+      ],
+      routes: [], models: [], fields: [], types: [], calls: [], references: [],
+      touches: [], imports: [], repoRoot: '/r', stats: {} as never,
+    } as unknown as GraphFacts,
+    '2026-08-19T00:00:00.000Z',
+  );
+
+  /** A boundary about the edit buffer, nowhere near keymap or audio. */
+  const editBuffer: BoundaryView = {
+    names: ['editBuffer'],
+    files: ['packages/core/src/edit-buffer.ts'],
+    coreFiles: ['packages/core/src/edit-buffer.ts'],
+    coreNames: ['editBuffer'],
+  };
+
+  it('moves the boundary when a prose prompt names a package directory', () => {
+    const verdict = classifyPrompt(
+      'different job now. the keymap parser needs a clearer comment.',
+      packagedIndex,
+      editBuffer,
+    );
+    expect(verdict.verdict).not.toBe('NO_SIGNAL');
+    expect(verdict.areaHits).toContain('keymap');
+  });
+
+  it('splits a hyphenated directory into words', () => {
+    // `audio-stream` must answer to "audio", or half of a monorepo's areas are
+    // unnameable in ordinary English.
+    const verdict = classifyPrompt('switch to audio: fix the sample drain', packagedIndex, editBuffer);
+    expect(verdict.areaHits).toContain('audio');
+    expect(verdict.verdict).not.toBe('NO_SIGNAL');
+  });
+
+  it('WIDENS rather than REPLACES, so a coincidence cannot destroy the task', () => {
+    // The safety property. An ordinary word may coincide with a directory name, so
+    // an area is never allowed to reset the boundary the way a typed path is.
+    const verdict = classifyPrompt('now the keymap side of it', packagedIndex, editBuffer);
+    expect(verdict.verdict).toBe('WIDENED');
+    expect(verdict.verdict).not.toBe('NEW');
+  });
+
+  it('says nothing when the named directory IS what the boundary is about', () => {
+    const inKeymap: BoundaryView = {
+      names: ['keymapThing0'],
+      files: ['packages/keymap/src/part0/impl.ts'],
+      coreFiles: ['packages/keymap/src/part0/impl.ts'],
+      coreNames: ['keymapThing0'],
+    };
+    const verdict = classifyPrompt('keep going on the keymap parser', packagedIndex, inKeymap);
+    expect(verdict.areaHits).not.toContain('keymap');
+  });
+
+  it('does not invent an area from a directory the repo does not have', () => {
+    const verdict = classifyPrompt('now work on the billing ledger', packagedIndex, editBuffer);
+    expect(verdict.areaHits).toEqual([]);
+  });
+});

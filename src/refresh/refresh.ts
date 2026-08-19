@@ -23,7 +23,7 @@ import { GraphClient, configFromEnv } from '../graph/client.js';
 import { findAnchors } from '../scope/anchors.js';
 import { buildNeighborhood } from '../scope/neighborhood.js';
 import { buildNameIndex, type NameIndex } from '../scope/taskSwitch.js';
-import { loadTask, replaceBoundary, stateDir, updateTask, writeAtomic } from '../state.js';
+import { STATE_DIR, loadTask, replaceBoundary, stateDir, updateTask, writeAtomic } from '../state.js';
 import type { GraphFacts } from '../extract/types.js';
 
 const FACTS_FILE = 'facts.json';
@@ -176,7 +176,22 @@ export function gitChangedEntries(repoRoot: string): GitChange[] {
       .filter((e) => e.path.length > 0)
       .filter((e) => !prefix || e.path.startsWith(prefix))
       .map((e) => (prefix ? { ...e, path: e.path.slice(prefix.length) } : e))
-      .filter((e) => /\.(ts|tsx)$/.test(e.path) || e.path.endsWith('.prisma'));
+      /**
+       * Never report Ichor's own bookkeeping as the developer's change.
+       *
+       * `ichor init` adds `.ichor/` to `.gitignore`, so this is usually moot — but
+       * correctness must not depend on the user's ignore file. Without it, a repo
+       * that was never `init`-ed (or whose `.gitignore` was edited) sees Ichor
+       * name `.ichor/task.json` at the end of every turn as an edit it never
+       * judged: a warning about itself, which is the exact shape of noise this
+       * codebase has twice had to remove. Caught by the unseen-edit tests the
+       * moment the type filter came off.
+       */
+      .filter((e) => e.path !== STATE_DIR && !e.path.startsWith(`${STATE_DIR}/`));
+    // DELIBERATELY NOT filtered by file type — see `isAnalysedPath`. The callers
+    // that only care about analysable code filter for themselves; the ones that
+    // must see every change (the shell gate, the end-of-turn unseen-edit report)
+    // were blind to anything that is not TypeScript while the filter lived here.
   } catch {
     return [];
   }
@@ -189,6 +204,29 @@ export function gitChangedEntries(repoRoot: string): GitChange[] {
  * monorepo prefix, renames, quoted paths — has to apply identically to both
  * callers, or the refresh and the Bash gate disagree about what changed.
  */
+/**
+ * Is this a path the analyser actually reads into the graph?
+ *
+ * Exported because the answer used to be baked into `gitChangedEntries`, which
+ * made two callers blind to anything that is not TypeScript:
+ *
+ *   - the shell gate never saw a `.md`, `.json` or `.css` written by a heredoc, so
+ *     it gave no verdict on it and never recorded it;
+ *   - `gitChangedPaths` delegates here, and the `Stop` handler's unseen-edit report
+ *     reads that — so the line whose entire purpose is to say *"this changed and I
+ *     never judged it"* could not say it either.
+ *
+ * Measured: a file created by heredoc during a live turn was neither judged nor
+ * named, while the SAME file through an edit tool was judged `CONNECTED` and
+ * recorded. Two write paths, two different amounts of truth.
+ *
+ * So the filter belongs at the callers that genuinely need it — staleness, where a
+ * README edit must not trigger a graph rebuild — and nowhere else.
+ */
+export function isAnalysedPath(file: string): boolean {
+  return /\.(ts|tsx)$/.test(file) || file.endsWith('.prisma');
+}
+
 export function gitChangedPaths(repoRoot: string): string[] {
   return gitChangedEntries(repoRoot).map((entry) => entry.path);
 }
@@ -214,7 +252,9 @@ export function needsRefresh(repoRoot: string): StalenessReason {
     return { stale: true, why: `${touchedByAgent.length} file(s) written by the agent` };
   }
 
-  for (const rel of gitChangedPaths(repoRoot)) {
+  // Only code the graph contains can make the graph stale. A changed README is a
+  // change, and it is not a reason to spend three seconds rebuilding.
+  for (const rel of gitChangedPaths(repoRoot).filter(isAnalysedPath)) {
     try {
       if (fs.statSync(path.join(repoRoot, rel)).mtimeMs > builtAt) {
         // "changed since the graph was built", NOT "changed outside the agent".

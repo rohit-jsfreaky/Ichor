@@ -4,703 +4,688 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Ichor — you asked for three files, it changed twenty</title>
-<meta name="description" content="You asked for three files. It changed twenty. Ichor watches your AI coding agent while it works and challenges it the moment it goes past the job you gave it." />
+<meta name="description" content="Ichor watches your AI coding agent while it works and challenges it the moment it goes past the job you gave it. Measured on 30 real commits from a real product." />
 <meta property="og:title" content="Ichor — you asked for three files, it changed twenty" />
 <meta property="og:description" content="Ichor watches your AI coding agent while it works and challenges it the moment it goes past the job you gave it. Measured on 30 real commits from a real product." />
 <meta property="og:type" content="website" />
 
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='0' y='0' width='14' height='14' rx='1.5' fill='%23a8ff35'/%3E%3Crect x='16' y='0' width='14' height='14' rx='1.5' fill='%23a8ff35'/%3E%3Crect x='0' y='16' width='14' height='14' rx='1.5' fill='%23a8ff35'/%3E%3Crect x='20' y='20' width='12' height='12' rx='1.5' fill='%23ffb020'/%3E%3C/svg%3E" />
-<link rel="alternate icon" href="icon.svg" />
-<meta name="theme-color" content="#a8ff35" />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='0' y='0' width='14' height='14' rx='2' fill='%231A1918'/%3E%3Crect x='16' y='0' width='14' height='14' rx='2' fill='%231A1918'/%3E%3Crect x='0' y='16' width='14' height='14' rx='2' fill='%231A1918'/%3E%3Crect x='20' y='20' width='12' height='12' rx='2' fill='%23C89B3C'/%3E%3C/svg%3E" />
+<meta name="theme-color" content="#F7F6F4" />
+
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
 <style>
-  /* Geist Pixel Square — the same display face HydraDB uses. SIL OFL. */
-  @font-face {
-    font-family: 'Geist Pixel Square';
-    src: url('https://cdn.jsdelivr.net/npm/geist@1.7.2/dist/fonts/geist-pixel/GeistPixel-Square.woff2') format('woff2');
-    font-weight: 400;
-    font-style: normal;
-    font-display: swap;
-  }
-
   :root {
-    --bg: #000;
-    --panel: #0a0a0a;
-    --fg: #fff;
-    --dim: rgba(255,255,255,.62);
-    --faint: rgba(255,255,255,.38);
-    --line: rgba(255,255,255,.12);
+    /* Near-white ground, white content column. The two are a shade apart, which is
+       what draws the vertical framing lines without drawing them. */
+    --ground:  #F7F6F4;
+    --col:     #FFFFFF;
+    --ink:     #191817;
+    --body:    #6E6B66;
+    --faint:   #9A968F;
+    --line:    rgba(25,24,23,.09);
+    --line-2:  rgba(25,24,23,.14);
 
-    /* Ichor's accent. HydraDB is #FF571A; ichor is the Hydra's venom. */
-    --acid: #a8ff35;
-    --acid-dim: #7fcc1e;
-    --warn: #ffb020;
+    /* No brand accent on the page chrome. The only colour is the official marks and
+       one desaturated sand behind the product shots. */
+    --tint:    #EFE9DC;
+    --tint-2:  #F6F2E9;
+    --gold:    #C89B3C;
 
-    --display: 'Geist Pixel Square', ui-monospace, monospace;
+    --term:    #171614;
+    --term-2:  #201E1B;
+    --term-fg: #E8E4DC;
+    --term-dim:rgba(232,228,220,.52);
+    --ok:      #A8FF35;
+
     --sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
 
-    --shell: 1120px;
+    /* Fluid, not fixed. At 1080px on a wide screen the column used barely half the
+       viewport and the page read as a narrow strip with dead ground either side.
+       The framed column still needs SOME ground showing on both sides for the
+       hairlines to mean anything, hence the 92vw ceiling rather than full bleed. */
+    --shell: min(1400px, 92vw);
+    --pad:   clamp(24px, 3.4vw, 56px);
   }
 
-  * { box-sizing: border-box; }
-
-  /* The nav is sticky, so anchor jumps must stop clear of it. */
-  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; scroll-padding-top: 76px; }
+  *, *::before, *::after { box-sizing: border-box; }
+  /* `clip`, not `hidden`. The hero terminal deliberately overflows to the viewport
+     edge, and overflow-x:hidden on body alone still let the document scroll
+     sideways — it has to be set on the root too, and `clip` does it without
+     creating a scroll container. */
+  html, body { overflow-x: clip; }
+  html { -webkit-text-size-adjust: 100%; }
 
   body {
     margin: 0;
-    background: var(--bg);
-    color: var(--fg);
+    background: var(--ground);
+    color: var(--ink);
     font-family: var(--sans);
-    font-size: 16px;
-    font-weight: 400;
-    line-height: 1.5;
-    letter-spacing: -0.01em;
+    font-size: 14px;
+    line-height: 1.6;
     -webkit-font-smoothing: antialiased;
   }
 
-  a { color: inherit; text-decoration: none; }
+  ::selection { background: var(--tint); color: var(--ink); }
+  a { color: inherit; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: 4px; }
 
-  .shell { width: 100%; max-width: var(--shell); margin: 0 auto; padding: 0 24px; }
+  /* The framed column: white, with a hairline on each side running the page height. */
+  .col {
+    max-width: var(--shell);
+    margin: 0 auto;
+    background: var(--col);
+    border-left: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+  }
+  .in { padding-inline: var(--pad); }
 
-  /* Everything is weight 400 and slightly negative-tracked, like the parent brand. */
-  h1, h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; text-transform: capitalize; }
-  h1 { font-size: clamp(38px, 7vw, 72px); line-height: 1.1; letter-spacing: -0.01em; }
-  h2 { font-size: clamp(28px, 4.4vw, 46px); line-height: 1.15; }
-  h3 { font-size: 20px; line-height: 1.3; }
+  /* ---------------------------------------------------------------- type */
 
-  p { margin: 0; }
+  h1, h2, h3 { margin: 0; font-weight: 500; letter-spacing: -.021em; text-wrap: balance; }
+  h1 { font-size: clamp(30px, 3.6vw, 38px); line-height: 1.14; letter-spacing: -.028em; }
+  h1 .b { color: var(--faint); }
+  h2 { font-size: clamp(21px, 2.4vw, 26px); line-height: 1.22; }
+  h3 { font-size: 16px; line-height: 1.35; }
+  p  { margin: 0; }
 
-  .eyebrow {
-    font-family: var(--mono);
-    font-size: 12px;
-    letter-spacing: .14em;
-    text-transform: uppercase;
-    color: var(--faint);
+  .sub   { color: var(--body); font-size: 13.5px; line-height: 1.62; }
+  .small { color: var(--body); font-size: 12.5px; line-height: 1.6; }
+  .kicker {
+    font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--faint); font-weight: 500;
+  }
+  .mono { font-family: var(--mono); }
+
+  .icode {
+    font-family: var(--mono); font-size: .9em;
+    background: var(--ground); border: 1px solid var(--line);
+    border-radius: 4px; padding: .1em .34em; white-space: nowrap;
   }
 
   /* ---------------------------------------------------------------- nav */
-  header {
-    position: sticky; top: 0; z-index: 20;
-    background: rgba(0,0,0,.82);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid var(--line);
+
+  .nav { position: relative; z-index: 20; }
+  .nav .row { display: flex; align-items: center; justify-content: space-between; height: 58px; }
+  .brand { display: inline-flex; align-items: center; gap: 9px; text-decoration: none; font-size: 14.5px; font-weight: 500; }
+  .brand .tile {
+    width: 22px; height: 22px; border-radius: 6px; background: var(--ink);
+    display: grid; place-items: center;
   }
-  .nav { display: flex; align-items: center; gap: 28px; height: 60px; }
-  .brand { font-family: var(--display); font-size: 21px; display: flex; align-items: center; gap: 9px; }
-  /* Three blocks together, one stepped out — the mark is the product. */
-  .mark { display: inline-flex; width: 18px; height: 18px; }
-  .mark svg { width: 100%; height: 100%; fill: var(--acid); }
-  .mark .out { fill: var(--warn); }
-  .nav-links { display: flex; gap: 22px; margin-left: auto; font-size: 14px; color: var(--dim); }
-  .nav-links a:hover { color: var(--fg); }
+  .navlinks { display: flex; align-items: center; gap: 22px; }
+  .navlinks a { font-size: 13px; color: var(--body); text-decoration: none; }
+  .navlinks a:hover { color: var(--ink); }
+  @media (max-width: 640px) { .navlinks a.sm-hide { display: none; } }
+
+  /* ---------------------------------------------------------------- buttons */
 
   .btn {
-    display: inline-flex; align-items: center; justify-content: center;
-    padding: 10px 18px; border-radius: 6px;
-    font-size: 14px; font-family: var(--sans);
-    border: 1px solid var(--line);
-    transition: background .15s ease, color .15s ease, border-color .15s ease;
+    display: inline-flex; align-items: center; gap: 7px;
+    height: 36px; padding: 0 15px; border-radius: 8px;
+    font-size: 13px; font-weight: 500; text-decoration: none;
+    background: var(--ink); color: #fff; border: 0; cursor: pointer;
+    transition: opacity .18s ease;
   }
-  .btn:hover { border-color: rgba(255,255,255,.32); }
-  .btn-primary { background: var(--acid); color: #000; border-color: var(--acid); }
-  .btn-primary:hover { background: var(--acid-dim); border-color: var(--acid-dim); }
+  .btn:hover { opacity: .86; }
+  .link {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 500; text-decoration: none; color: var(--ink);
+  }
+  .link:hover { color: var(--body); }
 
   /* ---------------------------------------------------------------- hero */
-  /* padding-block, not the shorthand — .hero sits ON .shell and the shorthand
-     would wipe the 24px gutter that keeps text off the edge on a phone. */
-  .hero { padding-block: 92px 72px; }
-  .keynote {
-    margin-top: 26px; padding: 22px 24px;
-    border: 1px solid var(--acid-dim); border-radius: 12px;
-    background: rgba(168,255,53,.045);
-  }
-  .keynote .num { color: var(--acid); }
-  .keynote h3 { font-size: 18px; margin-top: 10px; }
-  .keynote p { color: var(--dim); font-size: 15px; margin-top: 10px; line-height: 1.65; max-width: 78ch; }
-  .keynote code { font-family: var(--mono); font-size: 13.5px; color: var(--acid); }
 
-  .banner {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-size: 14px; color: var(--acid); margin-bottom: 28px;
-  }
-  .hero p.lede { margin-top: 26px; font-size: 19px; color: var(--dim); max-width: 620px; line-height: 1.55; }
-  .hero .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; align-items: center; }
+  /* overflow:hidden is what actually crops the shot. Without it the terminal is
+     `width:66vw` starting two-thirds across the grid, so its right edge lands
+     past the viewport and the page reads as broken. Clipping here ends it flush
+     with the column's right hairline — still a crop, but a deliberate one. */
+  .hero { position: relative; overflow: hidden; padding-top: 58px; padding-bottom: 64px; }
+  /* The second track is minmax(0,1fr) on purpose: without the 0 minimum the
+     880px terminal becomes the track's min-content and crushes the copy column
+     to one word per line. With it, the terminal is free to overflow right and
+     .hero's overflow:hidden crops it at the column edge — which is the point. */
+  .hero-grid { display: grid; grid-template-columns: minmax(340px, 30%) minmax(0, 1fr); gap: 48px; align-items: center; }
+  .hero-copy { display: flex; flex-direction: column; gap: 18px; }
+  .hero-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 4px; }
 
-  code.inline {
-    font-family: var(--mono); font-size: 14px;
-    background: var(--panel); border: 1px solid var(--line);
-    padding: 10px 14px; border-radius: 6px; color: var(--fg);
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
+    height: 26px; padding: 0 10px 0 8px;
+    border: 1px solid var(--line-2); border-radius: 999px;
+    font-size: 11.5px; color: var(--body); text-decoration: none; background: var(--col);
   }
-  code.inline .prompt { color: var(--acid); }
+  .pill:hover { border-color: var(--ink); color: var(--ink); }
+  .pill .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--gold); }
+
+  /* the terminal runs off the right edge — a window into something larger */
+  /* The shot escapes the framed column and runs to the viewport edge — cropped,
+     so it reads as a window into something larger rather than a picture placed
+     on a page. body has overflow-x:hidden, which is what does the cropping. */
+  .hero-shot { position: relative; min-width: 0; }
+  /* Plain 100%. A wider-than-its-track floor made the shot uncropped at 1536px
+     and cropped by a quarter at 1100px — the same element behaving differently
+     for no reason the reader can see. .hero's overflow:hidden stays as a net. */
+  .hero-shot .term { width: 100%; }
+  @media (max-width: 1040px) {
+    .hero-grid { grid-template-columns: 1fr; gap: 34px; }
+    .hero-shot .term { width: 100%; }
+    .hero { padding-bottom: 48px; }
+  }
 
   /* ---------------------------------------------------------------- terminal */
-  .terminal {
-    margin-top: 52px;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 8px;
+
+  .term {
+    background: var(--term);
+    border-radius: 10px;
     overflow: hidden;
+    box-shadow: 0 1px 2px rgba(25,24,23,.05), 0 16px 40px -24px rgba(25,24,23,.30);
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.66;
+    color: var(--term-fg);
+    text-align: left;
   }
-  .terminal-bar {
+  .term-bar {
     display: flex; align-items: center; gap: 8px;
-    padding: 11px 15px; border-bottom: 1px solid var(--line);
-    font-family: var(--mono); font-size: 12px; color: var(--faint);
+    padding: 9px 14px; background: var(--term-2);
+    color: var(--term-dim); font-size: 10.5px; letter-spacing: .02em;
   }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,.16); }
-  .terminal-body {
-    padding: 20px 18px; overflow-x: auto;
-    font-family: var(--mono); font-size: 13px; line-height: 1.75;
-    white-space: pre; color: var(--dim);
+  .term-bar .dots { display: flex; gap: 5px; margin-right: 4px; }
+  .term-bar .dots i { width: 7px; height: 7px; border-radius: 50%; background: rgba(232,228,220,.16); }
+  .term-body { padding: 16px 16px 18px; overflow-x: auto; }
+  .ln { display: flex; gap: 10px; align-items: flex-start; }
+  .who { color: var(--term-dim); flex: 0 0 auto; min-width: 50px; }
+  .who.you { color: var(--gold); }
+  .said { color: var(--term-fg); }
+  .said.dim { color: var(--term-dim); }
+  .ok { color: var(--ok); }
+  .warn { color: var(--gold); }
+  .sp { height: 10px; }
+  .challenge {
+    margin-top: 10px; padding: 11px 13px;
+    border-left: 2px solid var(--gold);
+    background: rgba(200,155,60,.07);
+    border-radius: 0 6px 6px 0;
   }
-  .u { color: var(--fg); }
-  .ok { color: var(--acid); }
-  .warn { color: var(--warn); }
-  .muted { color: var(--faint); }
+  .challenge > * + * { margin-top: 5px; }
+
+  /* ---------------------------------------------------------------- strip */
+
+  .strip { padding-block: 30px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .strip .cap { text-align: center; margin-bottom: 18px; }
+  .strip .row {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px 32px;
+  }
+  .strip .it { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--body); }
+  .strip .it svg { width: 15px; height: 15px; fill: var(--faint); flex: none; }
 
   /* ---------------------------------------------------------------- sections */
-  section { padding: 84px 0; border-top: 1px solid var(--line); }
-  .section-head { max-width: 660px; margin-bottom: 44px; }
-  .section-head h2 { margin-top: 14px; }
-  .section-head p { margin-top: 18px; color: var(--dim); font-size: 17px; }
 
-  .grid { display: grid; gap: 20px; }
-  .grid-3 { grid-template-columns: repeat(3, 1fr); }
-  .grid-2 { grid-template-columns: repeat(2, 1fr); }
+  section { padding-block: 76px; }
+  .head { max-width: 58ch; margin-inline: auto; text-align: center; display: flex; flex-direction: column; gap: 12px; align-items: center; }
+  .head .sub { max-width: 50ch; }
+  .rule { height: 1px; background: var(--line); border: 0; margin: 0; }
 
-  .card {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: 8px; padding: 26px;
+  /* the icon flow motif */
+  .flow {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border-radius: 14px;
+    background: var(--ground); border: 1px solid var(--line);
   }
-  .card h3 { margin-bottom: 10px; }
-  .card p { color: var(--dim); font-size: 15px; }
-  .card .num {
-    font-family: var(--mono); font-size: 12px; color: var(--acid);
-    letter-spacing: .12em; margin-bottom: 14px; display: block;
+  .flow .t {
+    width: 36px; height: 36px; border-radius: 10px; background: var(--col);
+    display: grid; place-items: center;
+    box-shadow: 0 1px 2px rgba(25,24,23,.06), 0 4px 10px -6px rgba(25,24,23,.18);
   }
+  .flow .t svg { width: 18px; height: 18px; }
+  .flow .t.dark { background: var(--ink); }
+  .flow .t.dark svg { fill: #fff; }
+  .flow .ar { color: var(--faint); font-size: 12px; }
 
-  /* A measured number, large enough to be the point of the card. */
-  .stat { font-family: var(--mono); font-size: 40px; line-height: 1.05; color: var(--acid); letter-spacing: -.02em; }
-  .stat .was { color: var(--faint); font-size: 22px; text-decoration: line-through; margin-right: 10px; }
-  .stat-note { margin-top: 10px; color: var(--dim); font-size: 14px; }
-
-  /* verdict states */
-  .states { display: grid; gap: 10px; }
-  .state {
-    display: grid; grid-template-columns: 168px 1fr; gap: 18px; align-items: baseline;
-    padding: 15px 18px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+  /* a product shot on a tinted bed, with the icon pill floating over its edge */
+  /* Capped and centred rather than filling the column. The transcripts inside are
+     mono text ~90 chars wide; stretched to a 1400px column they read as a mostly
+     empty box. The bed frames the shot, so it should be about the shot's size. */
+  .bed {
+    position: relative;
+    max-width: 1000px; margin-inline: auto;
+    margin-top: 46px;
+    padding: 46px 14px 14px;
+    border-radius: 12px;
+    background: linear-gradient(180deg, var(--tint) 0%, var(--tint-2) 46%, var(--col) 100%);
   }
-  .state .k { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; }
-  .state .v { color: var(--dim); font-size: 15px; }
-
-  table { width: 100%; border-collapse: collapse; font-size: 15px; }
-  th, td { text-align: left; padding: 13px 0; border-bottom: 1px solid var(--line); }
-  th { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); font-weight: 400; }
-  td.agent { color: var(--fg); }
-  td.level { color: var(--acid); font-family: var(--mono); font-size: 13px; }
-  td.level.soon { color: var(--faint); }
-  td.how { color: var(--dim); }
-
-  ul.plain { margin: 0; padding-left: 20px; color: var(--dim); font-size: 15px; }
-  ul.plain li { margin-bottom: 10px; }
-
-  .steps { counter-reset: step; display: grid; gap: 2px; }
-  .step { display: grid; grid-template-columns: 44px 1fr; gap: 16px; padding: 20px 0; border-bottom: 1px solid var(--line); }
-  .step .n { font-family: var(--display); font-size: 22px; color: var(--acid); }
-  .step h3 { font-size: 18px; }
-  .step p { color: var(--dim); font-size: 15px; margin-top: 6px; }
-
-  footer { border-top: 1px solid var(--line); padding: 44px 0 60px; color: var(--faint); font-size: 14px; }
-  .footer-row { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; }
-  .footer-row a { color: var(--dim); }
-  .footer-row a:hover { color: var(--fg); }
-  .footer-note { margin-top: 22px; max-width: 640px; line-height: 1.6; }
-
-  @media (max-width: 860px) {
-    .grid-3, .grid-2 { grid-template-columns: 1fr; }
-    /* Section jumps go, GitHub stays — on a phone it is the only link that
-       leads anywhere the page itself does not. */
-    .nav-links a:not(.keep) { display: none; }
-    .state { grid-template-columns: 1fr; gap: 6px; }
-    .hero { padding-block: 60px 48px; }
-    section { padding: 60px 0; }
+  .bed .float {
+    position: absolute; top: -19px; left: 50%; transform: translateX(-50%);
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 11px; border-radius: 999px;
+    background: var(--col); border: 1px solid var(--line);
+    box-shadow: 0 2px 6px rgba(25,24,23,.07), 0 10px 24px -14px rgba(25,24,23,.22);
   }
+  .bed .float .t { width: 26px; height: 26px; border-radius: 8px; background: var(--ground); display: grid; place-items: center; }
+  .bed .float .t.dark { background: var(--ink); }
+  .bed .float .t.dark svg { fill: #fff; }
+  .bed .float .t svg { width: 14px; height: 14px; }
+  .bed .float .ar { color: var(--faint); font-size: 11px; }
+
+  .block + .block { margin-top: 62px; padding-top: 62px; border-top: 1px solid var(--line); }
+  .block .head { margin-bottom: 0; }
+
+  /* ---------------------------------------------------------------- cards */
+
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .cell { background: var(--col); padding: 22px 20px; display: flex; flex-direction: column; gap: 8px; }
+  .cell .n { font-family: var(--mono); font-size: 26px; letter-spacing: -.02em; }
+  @media (max-width: 820px) { .grid3, .grid2 { grid-template-columns: 1fr; } }
+
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  .step { display: flex; flex-direction: column; gap: 8px; padding-top: 15px; border-top: 1px solid var(--line-2); }
+  .step .i { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  @media (max-width: 820px) { .steps { grid-template-columns: 1fr; gap: 20px; } }
+
+  .rows { display: grid; }
+  .row-i { padding: 17px 0; border-top: 1px solid var(--line); }
+  .row-i:last-child { border-bottom: 1px solid var(--line); }
+  .row-i b { font-weight: 500; }
+
+  /* ---------------------------------------------------------------- footer */
+
+  footer { border-top: 1px solid var(--line); padding-block: 40px 52px; }
+  .foot { display: flex; flex-wrap: wrap; gap: 28px; justify-content: space-between; }
+  .foot .links { display: flex; gap: 40px; }
+  .foot .links section { padding: 0; }
+  .foot .grp { display: flex; flex-direction: column; gap: 8px; }
+  .foot .grp a { font-size: 12.5px; color: var(--body); text-decoration: none; }
+  .foot .grp a:hover { color: var(--ink); }
+
+  /* ---------------------------------------------------------------- motion */
+
+  .rv { opacity: 0; transform: translateY(10px); transition: opacity .65s cubic-bezier(.22,.61,.36,1), transform .65s cubic-bezier(.22,.61,.36,1); }
+  .rv.on { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) { .rv { opacity: 1; transform: none; transition: none; } }
 </style>
 </head>
 <body>
 
-<header>
-  <div class="shell nav">
-    <a class="brand" href="#top"><span class="mark" aria-hidden="true"><svg viewBox="0 0 32 32"><rect x="0" y="0" width="14" height="14" rx="1.5"/><rect x="16" y="0" width="14" height="14" rx="1.5"/><rect x="0" y="16" width="14" height="14" rx="1.5"/><rect class="out" x="20" y="20" width="12" height="12" rx="1.5"/></svg></span>Ichor</a>
-    <nav class="nav-links">
-      <a href="#notagraph">The difference</a>
-      <a href="#how">How it works</a>
-      <a href="#says">What it says</a>
-      <a href="#tools">Ask the graph</a>
-      <a href="#proof">Proof</a>
-      <a href="#install">Install</a>
-      <a href="./docs.html">Docs</a>
-      <a class="keep" href="https://github.com/rohit-jsfreaky/ichor">GitHub</a>
-    </nav>
+<!-- official brand marks, inlined once -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-claude" viewBox="0 0 24 24"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></symbol>
+  <symbol id="i-openai" viewBox="0 0 24 24"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></symbol>
+  <symbol id="i-mcp" viewBox="0 0 24 24"><path d="M13.85 0a4.16 4.16 0 0 0-2.95 1.217L1.456 10.66a.835.835 0 0 0 0 1.18.835.835 0 0 0 1.18 0l9.442-9.442a2.49 2.49 0 0 1 3.541 0 2.49 2.49 0 0 1 0 3.541L8.59 12.97l-.1.1a.835.835 0 0 0 0 1.18.835.835 0 0 0 1.18 0l.1-.098 7.03-7.034a2.49 2.49 0 0 1 3.542 0l.049.05a2.49 2.49 0 0 1 0 3.54l-8.54 8.54a1.96 1.96 0 0 0 0 2.755l1.753 1.753a.835.835 0 0 0 1.18 0 .835.835 0 0 0 0-1.18l-1.753-1.753a.266.266 0 0 1 0-.394l8.54-8.54a4.185 4.185 0 0 0 0-5.9l-.05-.05a4.16 4.16 0 0 0-2.95-1.218c-.2 0-.401.02-.6.048a4.17 4.17 0 0 0-1.17-3.552A4.16 4.16 0 0 0 13.85 0m0 3.333a.84.84 0 0 0-.59.245L6.275 10.56a4.186 4.186 0 0 0 0 5.902 4.186 4.186 0 0 0 5.902 0L19.16 9.48a.835.835 0 0 0 0-1.18.835.835 0 0 0-1.18 0l-6.985 6.984a2.49 2.49 0 0 1-3.54 0 2.49 2.49 0 0 1 0-3.54l6.983-6.985a.835.835 0 0 0 0-1.18.84.84 0 0 0-.59-.245"/></symbol>
+  <symbol id="i-ts" viewBox="0 0 24 24"><path d="M1.125 0C.502 0 0 .502 0 1.125v21.75C0 23.498.502 24 1.125 24h21.75c.623 0 1.125-.502 1.125-1.125V1.125C24 .502 23.498 0 22.875 0zm17.363 9.75c.612 0 1.154.037 1.627.111a6.38 6.38 0 0 1 1.306.34v2.458a3.95 3.95 0 0 0-.643-.361 5.093 5.093 0 0 0-.717-.26 5.453 5.453 0 0 0-1.426-.2c-.3 0-.573.028-.819.086a2.1 2.1 0 0 0-.623.242c-.17.104-.3.229-.393.374a.888.888 0 0 0-.14.49c0 .196.053.373.156.529.104.156.252.304.443.444s.423.276.696.41c.273.135.582.274.926.416.47.197.892.407 1.266.628.374.222.695.473.963.753.268.279.472.598.614.957.142.359.214.776.214 1.253 0 .657-.125 1.21-.373 1.656a3.033 3.033 0 0 1-1.012 1.085 4.38 4.38 0 0 1-1.487.596c-.566.12-1.163.18-1.79.18a9.916 9.916 0 0 1-1.84-.164 5.544 5.544 0 0 1-1.512-.493v-2.63a5.033 5.033 0 0 0 3.237 1.2c.333 0 .624-.03.872-.09.249-.06.456-.144.623-.25.166-.108.29-.234.373-.38a1.023 1.023 0 0 0-.074-1.089 2.12 2.12 0 0 0-.537-.5 5.597 5.597 0 0 0-.807-.444 27.72 27.72 0 0 0-1.007-.436c-.918-.383-1.602-.852-2.053-1.405-.45-.553-.676-1.222-.676-2.005 0-.614.123-1.141.369-1.582.246-.441.58-.804 1.004-1.089a4.494 4.494 0 0 1 1.47-.629 7.536 7.536 0 0 1 1.77-.201zm-15.113.188h9.563v2.166H9.506v9.646H6.789v-9.646H3.375z"/></symbol>
+  <symbol id="i-docker" viewBox="0 0 24 24"><path d="M13.983 11.078h2.119a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.119a.185.185 0 00-.185.185v1.888c0 .102.083.185.185.185m-2.954-5.43h2.118a.186.186 0 00.186-.186V3.574a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m0 2.716h2.118a.187.187 0 00.186-.186V6.29a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.887c0 .102.082.185.185.186m-2.93 0h2.12a.186.186 0 00.184-.186V6.29a.185.185 0 00-.185-.185H8.1a.185.185 0 00-.185.185v1.887c0 .102.083.185.185.186m-2.964 0h2.119a.186.186 0 00.185-.186V6.29a.185.185 0 00-.185-.185H5.136a.186.186 0 00-.186.185v1.887c0 .102.084.185.186.186m5.893 2.715h2.118a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m-2.93 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.083.185.185.185m-2.964 0h2.119a.185.185 0 00.185-.185V9.006a.185.185 0 00-.184-.186h-2.12a.186.186 0 00-.186.186v1.887c0 .102.084.185.186.185m-2.92 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.082.185.185.185M23.763 9.89c-.065-.051-.672-.51-1.954-.51-.338.001-.676.03-1.01.087-.248-1.7-1.653-2.53-1.716-2.566l-.344-.199-.226.327c-.284.438-.49.922-.612 1.43-.23.97-.09 1.882.403 2.661-.595.332-1.55.413-1.744.42H.751a.751.751 0 00-.75.748 11.376 11.376 0 00.692 4.062c.545 1.428 1.355 2.48 2.41 3.124 1.18.723 3.1 1.137 5.275 1.137.983.003 1.963-.086 2.93-.266a12.248 12.248 0 003.823-1.389c.98-.567 1.86-1.288 2.61-2.136 1.252-1.418 1.998-2.997 2.553-4.4h.221c1.372 0 2.215-.549 2.68-1.009.309-.293.55-.65.707-1.046l.098-.288Z"/></symbol>
+  <symbol id="i-ichor" viewBox="0 0 32 32">
+    <rect x="0" y="0" width="14" height="14" rx="2"/><rect x="16" y="0" width="14" height="14" rx="2"/>
+    <rect x="0" y="16" width="14" height="14" rx="2"/><rect x="20" y="20" width="12" height="12" rx="2" opacity=".55"/>
+  </symbol>
+</svg>
+
+<div class="col">
+
+  <nav class="nav in">
+    <div class="row">
+      <a class="brand" href="#top">
+        <span class="tile"><svg width="12" height="12" style="fill:#fff"><use href="#i-ichor"/></svg></span>
+        ichor
+      </a>
+      <div class="navlinks">
+        <a class="sm-hide" href="#how">How it works</a>
+        <a class="sm-hide" href="#proof">Proof</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/rohit-jsfreaky/ichor">GitHub →</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ======================================================= hero -->
+  <section class="hero in" id="top">
+    <div class="hero-grid">
+      <div class="hero-copy">
+        <a class="pill rv" href="https://hackhydra.hydradb.com/"><span class="dot"></span> Built on HydraDB · Hack Hydra 2026</a>
+        <h1 class="rv">You asked for three files.<br><span class="b">It changed twenty.</span></h1>
+        <p class="sub rv">
+          Ichor watches your coding agent while it works and challenges it the moment it
+          goes past the job you gave it — with the path it can point at.
+        </p>
+        <div class="hero-actions rv">
+          <button class="btn" id="copy" type="button">
+            <span class="mono">npm i -g ichor-cli</span>
+            <svg id="cicon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.6">
+              <rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </button>
+          <a class="link" href="#how">How it works →</a>
+        </div>
+      </div>
+
+      <div class="hero-shot rv">
+        <div class="term">
+          <div class="term-bar"><span class="dots"><i></i><i></i><i></i></span> claude code — vendor-app</div>
+          <div class="term-body">
+            <div class="ln"><span class="who you">you ›</span><span class="said">Duplicate email in vendor onboarding returns 500. Handle it properly, show a toast, and don't wipe the form.</span></div>
+            <div class="sp"></div>
+            <div class="ln"><span class="who">claude ›</span><span class="said dim">editing src/lib/vendors/create.ts &nbsp;<span class="ok">✓ in scope</span></span></div>
+            <div class="ln"><span class="who">claude ›</span><span class="said dim">editing src/app/api/vendors/route.ts &nbsp;<span class="ok">✓ in scope</span></span></div>
+            <div class="ln"><span class="who">claude ›</span><span class="said dim">editing src/lib/vendors/submit.ts &nbsp;<span class="ok">✓ in scope</span></span></div>
+            <div class="ln"><span class="who">claude ›</span><span class="said">creating src/app/api/vendors/check-email/route.ts</span></div>
+            <div class="challenge">
+              <div class="warn">⚠ ichor: this looks like scope expansion.</div>
+              <div class="said dim">A new POST endpoint that reaches Vendor — but the task's existing path already reaches it:</div>
+              <div class="ok">POST /api/vendors → createVendor → Vendor.email (unique)</div>
+              <div class="said dim">Why is a separate endpoint required?</div>
+            </div>
+            <div class="sp"></div>
+            <div class="ln"><span class="who">claude ›</span><span class="said">It isn't. I'll handle the duplicate in the existing submit flow.</span></div>
+            <div class="sp"></div>
+            <div class="ln"><span class="who">result ›</span><span class="said"><span class="ok">3 files changed. 0 new endpoints.</span> Task done.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================================================= strip -->
+  <div class="strip in">
+    <p class="small cap">Runs inside the agent you already use. No account, nothing uploaded.</p>
+    <div class="row">
+      <span class="it"><svg><use href="#i-claude"/></svg> Claude Code</span>
+      <span class="it"><svg><use href="#i-openai"/></svg> Codex CLI</span>
+      <span class="it"><svg><use href="#i-mcp"/></svg> MCP</span>
+      <span class="it"><svg><use href="#i-ts"/></svg> TypeScript</span>
+      <span class="it"><svg><use href="#i-docker"/></svg> Docker</span>
+    </div>
   </div>
-</header>
 
-<main id="top">
+  <!-- ======================================================= judgement -->
+  <section class="in" id="how">
+    <div class="head rv">
+      <span class="kicker">The judgement</span>
+      <h2>Connected is not the same as necessary.</h2>
+      <p class="sub">
+        Your agent adds an endpoint during a duplicate-email fix. Ask any search tool
+        whether it relates to the task and everything says yes — same table, same folder,
+        same service. All true, so relatedness gives you no reason to object.
+      </p>
+    </div>
 
-  <!-- ------------------------------------------------------------ hero -->
-  <div class="shell hero">
-    <div class="banner">Built on HydraDB for Hack Hydra 2026 →</div>
-    <h1>You Asked For Three Files.<br />It Changed Twenty.</h1>
-    <p class="lede">
-      Ichor watches your coding agent as it works, catches unnecessary scope expansion, and
-      challenges it before a small fix turns into a twenty-file mess.
+    <div class="bed rv">
+      <span class="float">
+        <span class="t"><svg><use href="#i-claude"/></svg></span>
+        <span class="ar">→</span>
+        <span class="t dark"><svg><use href="#i-ichor"/></svg></span>
+        <span class="ar">→</span>
+        <span class="t"><svg><use href="#i-mcp"/></svg></span>
+      </span>
+      <div class="term">
+        <div class="term-bar"><span class="dots"><i></i><i></i><i></i></span> the question Ichor asks next</div>
+        <div class="term-body">
+<pre style="margin:0">  the task's existing path
+  <span class="ok">POST /api/vendors ──────► createVendor ──────► Vendor.email (unique)</span>
+                                                        <span class="warn">▲</span>
+  the new endpoint                                      <span class="warn">│</span>
+  <span class="warn">POST /api/vendors/check-email ────────────────────────┘</span>
+                                <span class="said dim">reaches the same rule by a second road</span></pre>
+        </div>
+      </div>
+    </div>
+
+    <p class="sub rv" style="max-width:54ch;margin:26px auto 0;text-align:center">
+      The database already refuses duplicate emails, and the submit path already reaches
+      that rule. The endpoint is connected, relevant, and <b style="color:var(--ink);font-weight:500">unnecessary</b>.
     </p>
-    <div class="cta">
-      <a class="btn btn-primary" href="#install">Get started</a>
-      <a class="btn" href="https://github.com/rohit-jsfreaky/ichor">View source</a>
-      <code class="inline"><span class="prompt">$</span> npm i -g ichor-cli</code>
+  </section>
+
+  <hr class="rule" />
+
+  <!-- ======================================================= how -->
+  <section class="in">
+    <div class="head rv" style="margin-bottom:40px">
+      <span class="kicker">How it works</span>
+      <h2>It knows what your code actually connects to.</h2>
+      <p class="sub">Not keyword matching. The TypeScript compiler resolves every call, import, route and model into a graph — then Ichor judges edits against it.</p>
     </div>
-
-    <div class="terminal">
-      <div class="terminal-bar">
-        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-        <span style="margin-left:8px">claude code — vendor-app</span>
+    <div class="steps rv">
+      <div class="step">
+        <span class="i">01</span>
+        <h3>It reads your repo, once</h3>
+        <p class="small">Every call, import, route and Prisma model, into a graph in a local HydraDB. 19 seconds for 1,362 files, then seconds to keep up.</p>
       </div>
-<div class="terminal-body"><span class="muted">you ›</span> <span class="u">Duplicate email in vendor onboarding returns 500. Handle it properly,
-      show a toast saying the email already exists, and don't wipe the form.</span>
-
-<span class="muted">claude ›</span> editing src/lib/vendors/create.ts          <span class="ok">✓ ichor: in scope</span>
-<span class="muted">claude ›</span> editing src/app/api/vendors/route.ts       <span class="ok">✓ ichor: in scope</span>
-<span class="muted">claude ›</span> editing src/lib/vendors/submit.ts          <span class="ok">✓ ichor: in scope</span>
-<span class="muted">claude ›</span> creating src/app/api/vendors/check-email/route.ts
-
-<span class="warn">⚠ ichor: this looks like scope expansion.</span>
-
-  This introduces a new POST endpoint at /api/vendors/check-email that
-  reaches Vendor, but the task's existing path already reaches it:
-
-    <span class="ok">POST /api/vendors → POST → createVendor → Vendor</span>
-
-  The existing POST /api/vendors already reaches Vendor, where
-  <span class="u">Vendor.email is already unique</span>. Why is a separate endpoint required?
-
-<span class="muted">claude ›</span> <span class="u">It isn't. I'll handle the duplicate in the existing submit flow.</span>
-
-<span class="muted">result ›</span> 3 files changed. 0 new endpoints. Task done.</div>
-    </div>
-  </div>
-
-  <!-- --------------------------------------------------------- problem -->
-  <section id="problem">
-    <div class="shell">
-      <div class="section-head">
-        <span class="eyebrow">The problem</span>
-        <h2>The Code Works. The Change Is Too Big.</h2>
-        <p>
-          Nobody reviews a twenty-file diff properly at 6pm. So the extra endpoint ships, and you
-          find out what it does three weeks later.
-        </p>
+      <div class="step">
+        <span class="i">02</span>
+        <h3>Your prompt draws the boundary</h3>
+        <p class="small">It finds where the task lives and walks outward through real call edges. No task to type — it reads the conversation, and moves when you move on.</p>
       </div>
-      <div class="grid grid-3">
-        <div class="card">
-          <span class="num">WHAT YOU ASKED</span>
-          <h3>One Small Fix</h3>
-          <p>Handle a duplicate email instead of returning a 500. Three files, one code path that already exists.</p>
-        </div>
-        <div class="card">
-          <span class="num">WHAT YOU GOT</span>
-          <h3>A New Flow</h3>
-          <p>A new endpoint, pre-submit validation, new client state, a shared utility, a changed API contract.</p>
-        </div>
-        <div class="card">
-          <span class="num">WHAT IT COSTS</span>
-          <h3>Your Review</h3>
-          <p>An architecture decision you never made, handed to you at the moment you have least context on it.</p>
-        </div>
+      <div class="step">
+        <span class="i">03</span>
+        <h3>Edits outside it get questioned</h3>
+        <p class="small">Before the write lands for an edit tool, the instant the command finishes for a shell write. Always with the existing path that already does the job.</p>
       </div>
     </div>
   </section>
 
-  <!-- ------------------------------------------------------ not a graph -->
-  <section id="notagraph">
-    <div class="shell">
-      <div class="section-head">
-        <span class="eyebrow">The difference</span>
-        <h2>It Is Not A Code Graph. It Uses One.</h2>
-        <p>
-          Ichor keeps a graph, but the graph is not the product — it is the evidence. Code-graph
-          tools answer <em>where is this?</em> Ichor answers a question none of them ask.
-        </p>
-      </div>
+  <hr class="rule" />
 
-      <div class="grid grid-2">
-        <div class="card">
-          <span class="num">A CODE GRAPH</span>
-          <h3>Where Is This, And What Relates To It?</h3>
-          <p>
-            Tools like <a href="https://github.com/Graphify-Labs/graphify" style="color:var(--acid)">Graphify</a>
-            map a codebase so you can query it instead of grepping. Around 40 languages, your docs
-            and PDFs too. You ask, it answers, you decide. They are good at that, and Ichor is not
-            trying to be one.
-          </p>
-        </div>
-        <div class="card">
-          <span class="num">ICHOR</span>
-          <h3>Should This Edit Be Part Of This Job?</h3>
-          <p>
-            Not a retrieval question. It runs on every write whether the agent asks or not, it
-            knows what you are working on today, and it has to justify a challenge with a path it
-            can point at. TypeScript and JavaScript only — that is the price of the depth.
-          </p>
-        </div>
-      </div>
-
-      <div class="grid grid-2" style="margin-top:2px">
-        <div class="card">
-          <span class="num">IT RESOLVES, IT DOES NOT MATCH</span>
-          <h3>Names Are Bound, Not Guessed</h3>
-          <p>
-            <code>import { send } from './email'</code> plus that module's export list <em>is</em>
-            the answer — so a call becomes an edge to a declaration Ichor can name, through
-            re-exports and namespace imports. Never a same-name coincidence, and never a match
-            inside a comment or a string.
-          </p>
-        </div>
-        <div class="card">
-          <span class="num">AND IT ADMITS THE GAPS</span>
-          <h3>7,178 Call Sites It Would Not Guess At</h3>
-          <p>
-            On papermark, that many calls could not be resolved to a declaration — so they are
-            <strong style="color:var(--fg);font-weight:400">counted and reported</strong>, not
-            invented. The graph is a floor, never an inflated one. A wrong edge would be quoted back
-            as evidence, and evidence has to be true.
-          </p>
-        </div>
-      </div>
-
-      <div class="section-head" style="margin-top:56px">
-        <h2 style="font-size:clamp(22px,3vw,30px)">Connected Is Not The Same As Necessary.</h2>
-        <p>
-          This is the difference in one example, and it is the whole reason a graph is needed
-          rather than a search.
-        </p>
-      </div>
-
-      <p class="muted" style="max-width:74ch;margin:0 0 18px">
-        Your agent adds <code>/api/vendors/check-email</code> during a duplicate-email fix. Ask any
-        search tool whether it relates to the task and everything says yes — same table, same
-        folder, same service. All true. So relatedness gives you no reason to object.
-      </p>
-
-      <div class="terminal">
-        <div class="terminal-bar">
-          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span style="margin-left:8px">the question Ichor asks next</span>
-        </div>
-<div class="terminal-body">the task's existing path:
-   <span class="ok">POST /api/vendors ────► createVendor ────► Vendor.email  (unique)</span>
-                                                   ▲
-   the new endpoint:                               │
-   <span class="warn">POST /api/vendors/check-email ──────────────────┘</span>
-        reaches the SAME rule by a SECOND road</div>
-      </div>
-
-      <p class="muted" style="margin-top:22px;max-width:74ch">
-        The database already refuses duplicate emails, and the submit path already reaches that
-        rule. So the endpoint is connected, relevant, and <strong style="color:var(--fg);font-weight:400">unnecessary</strong>
-        — a second enforcement of something already enforced. No amount of retrieval makes that
-        judgement for you. They solve different problems, and you could reasonably run both.
-      </p>
+  <!-- ======================================================= blocks -->
+  <section class="in">
+    <div class="head rv" style="margin-bottom:8px">
+      <span class="kicker">In the session</span>
+      <h2>It follows the job, not the folder.</h2>
+      <p class="sub">Two things a boundary has to survive: you moving on, and your agent reaching for the shell.</p>
     </div>
-  </section>
 
-  <!-- ------------------------------------------------------------- how -->
-  <section id="how">
-    <div class="shell">
-      <div class="section-head">
-        <span class="eyebrow">How it works</span>
-        <h2>It Knows What Your Code Actually Connects To.</h2>
-        <p>
-          Not keyword matching. Ichor compiles your codebase into a graph of what calls what, which
-          endpoints reach which tables, and which types everything depends on — then judges edits
-          against it.
-        </p>
+    <div class="block" style="margin-top:44px">
+      <div class="head rv">
+        <h3>Move on, and it moves with you</h3>
+        <p class="small" style="max-width:48ch">Nobody runs a command between tasks. A boundary drawn at 9am would still be policing vendor code at 2pm while you are deep in billing.</p>
       </div>
-      <div class="steps">
-        <div class="step">
-          <span class="n">1</span>
-          <div>
-            <h3>It reads your repo, once</h3>
-            <p>
-              The TypeScript compiler resolves every call, import, route and Prisma model into a
-              graph stored in a local HydraDB. 19 seconds for 1,362 files, then seconds to keep up.
-            </p>
+      <div class="bed rv">
+        <span class="float">
+          <span class="t"><svg><use href="#i-claude"/></svg></span>
+          <span class="ar">→</span>
+          <span class="t dark"><svg><use href="#i-ichor"/></svg></span>
+        </span>
+        <div class="term">
+          <div class="term-bar"><span class="dots"><i></i><i></i><i></i></span> .ichor/hook.log — the same session, two hours later</div>
+          <div class="term-body">
+            <div class="ln"><span class="who you">you ›</span><span class="said">now fix the invoice totals in lib/billing/invoice.ts</span></div>
+            <div class="sp"></div>
+            <div class="ln"><span class="who">prompt ›</span><span class="said dim"><span class="warn">NEW</span> — names lib/billing/invoice.ts outright, which the boundary does not cover</span></div>
+            <div class="ln"><span class="who">prompt ›</span><span class="said dim">boundary set — 14 functions in 0.1s</span></div>
+            <div class="sp"></div>
+            <div class="ln"><span class="who">claude ›</span><span class="said dim">editing lib/billing/invoice.ts &nbsp;<span class="ok">✓ EXPECTED</span></span></div>
+            <div class="ln"><span class="who">claude ›</span><span class="said dim">editing src/lib/vendors/create.ts &nbsp;<span class="warn">⚠ SUSPICIOUS</span></span></div>
+            <div class="sp"></div>
+            <div class="ln"><span class="who">note ›</span><span class="said dim">vendor code was in scope this morning. It is not the job now.</span></div>
           </div>
         </div>
-        <div class="step">
-          <span class="n">2</span>
-          <div>
-            <h3>Your prompt draws a boundary</h3>
-            <p>
-              Ichor finds where your task lives and walks outward through real call edges. Name a
-              file and the boundary is that file and its neighbours &mdash; <strong style="color:var(--fg);font-weight:400">9 functions instead of 135</strong>
-              on a real project. No command to type; it reads the conversation.
-            </p>
-          </div>
-        </div>
-        <div class="step">
-          <span class="n">3</span>
-          <div>
-            <h3>Edits outside it get questioned</h3>
-            <p>
-              Before the write lands, not after. And it has to show its evidence &mdash; the
-              existing path that already does the job, named function by named function.
-            </p>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="head rv">
+        <h3>Your agent gets to use the graph too</h3>
+        <p class="small" style="max-width:48ch">The same graph that judges edits will answer questions, as MCP tools and as plain shell commands.</p>
+      </div>
+      <div class="bed rv">
+        <span class="float">
+          <span class="t dark"><svg><use href="#i-ichor"/></svg></span>
+          <span class="ar">→</span>
+          <span class="t"><svg><use href="#i-mcp"/></svg></span>
+        </span>
+        <div class="term">
+          <div class="term-bar"><span class="dots"><i></i><i></i><i></i></span> ask the graph</div>
+          <div class="term-body">
+            <div class="ln"><span class="who you">$</span><span class="said">ichor impact getChunkedCookie</span></div>
+            <div class="sp"></div>
+            <div class="ln"><span class="who"></span><span class="said dim">declared in &nbsp;packages/better-auth/src/cookies/session-store.ts</span></div>
+            <div class="ln"><span class="who"></span><span class="said dim">called by 43:</span></div>
+            <div class="ln"><span class="who"></span><span class="said dim">&nbsp;&nbsp;<span class="ok">→</span> getSession &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;api/routes/session.ts</span></div>
+            <div class="ln"><span class="who"></span><span class="said dim">&nbsp;&nbsp;<span class="ok">⇢</span> setCookieCache &nbsp;cookies/index.ts</span></div>
+            <div class="sp"></div>
+            <div class="ln"><span class="who"></span><span class="said dim">→ direct call, ⇢ through a chain.</span></div>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ----------------------------------------------------------- says -->
-  <section id="says">
-    <div class="shell">
-      <div class="section-head">
-        <span class="eyebrow">What it says</span>
-        <h2>It Asks Why. It Never Says No.</h2>
-        <p>
-          A tool that fires on every third edit gets uninstalled the same afternoon. Ichor is built
-          to be quiet — and to lose the argument gracefully when it is wrong.
-        </p>
-      </div>
-      <div class="states">
-        <div class="state"><span class="k ok">EXPECTED</span><span class="v">Inside the boundary. Ichor says nothing at all.</span></div>
-        <div class="state"><span class="k ok">CONNECTED</span><span class="v">Just outside, with a real path back. The boundary grows on its own.</span></div>
-        <div class="state"><span class="k warn">SUSPICIOUS</span><span class="v">No real connection. Ichor asks why, and shows the evidence it used.</span></div>
-        <div class="state"><span class="k ok">JUSTIFIED</span><span class="v">The agent explained, the codebase backs it up. The boundary grows.</span></div>
-        <div class="state"><span class="k muted">YOUR CALL</span><span class="v">Plausible but unverifiable. Ichor asks you instead of deciding.</span></div>
-      </div>
-      <p class="muted" style="margin-top:22px;max-width:70ch">
-        It never blocks a prompt and it never asks twice about the same file. Write the file anyway
-        and it lands — Ichor just remembers that the reason was never given.
-      </p>
+  <hr class="rule" />
+
+  <!-- ======================================================= proof -->
+  <section class="in" id="proof">
+    <div class="head rv" style="margin-bottom:36px">
+      <span class="kicker">Proof</span>
+      <h2>Measured on somebody else's code.</h2>
+      <p class="sub">The number that decides whether a tool like this survives is how often it interrupts work you were right to do. Passing your own tests on your own demo proves nothing about that.</p>
     </div>
+    <div class="grid3 rv">
+      <div class="cell">
+        <span class="kicker">False alarms</span>
+        <span class="n">12.8%</span>
+        <p class="small">Share of edits a developer genuinely had to make that Ichor would have interrupted — about one in eight. Replayed through the real classifier, not estimated.</p>
+      </div>
+      <div class="cell">
+        <span class="kicker">Evidence</span>
+        <span class="n">86</span>
+        <p class="small">Files across 30 real commits from a real product. Each commit message is the task; the files it changed are the truth. Every file type, not just the ones Ichor reads.</p>
+      </div>
+      <div class="cell">
+        <span class="kicker">Speed</span>
+        <span class="n">6s</span>
+        <p class="small">To catch up after you edit a file in a 1,362-file codebase. The largest repo tested — 7,735 files — is read at Node's default heap.</p>
+      </div>
+    </div>
+    <p class="small rv" style="margin-top:20px;text-align:center">Every number here is reproducible from the repository, and the harness that produces it ships with the source.</p>
   </section>
 
-  <!-- -------------------------------------------------------- all day -->
-  <section id="allday">
-    <div class="shell">
-      <div class="section-head">
-        <span class="eyebrow">All day, one session</span>
-        <h2>Move On, And It Moves With You.</h2>
-        <p>
-          Nobody runs a CLI command between tasks. A boundary drawn at 9am would still be policing
-          vendor code at 2pm while you are deep in billing, arguing with every edit.
-        </p>
-      </div>
-      <div class="terminal">
-        <div class="terminal-bar">
-          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span style="margin-left:8px">.ichor/hook.log — the same session, two hours later</span>
-        </div>
-<div class="terminal-body"><span class="muted">you ›</span> <span class="u">now fix the invoice totals in lib/billing/invoice.ts</span>
+  <hr class="rule" />
 
-<span class="ok">prompt: NEW</span> — names lib/billing/invoice.ts outright, which the boundary does not cover
-<span class="ok">prompt: boundary set</span> — 14 functions in 0.1s
-
-<span class="muted">claude ›</span> editing lib/billing/invoice.ts             <span class="ok">✓ EXPECTED</span>
-<span class="muted">claude ›</span> editing src/lib/vendors/create.ts          <span class="warn">⚠ SUSPICIOUS</span>
-
-<span class="muted">note ›</span> vendor code was in scope this morning. It is not the job now.</div>
-      </div>
-      <p class="muted" style="margin-top:22px;max-width:70ch">
-        Ask a question instead of giving an instruction and the boundary does not move at all —
-        you are not changing anything, so there is nothing to protect.
-      </p>
+  <!-- ======================================================= install -->
+  <section class="in">
+    <div class="head rv" style="margin-bottom:36px">
+      <span class="kicker">Install</span>
+      <h2>Three commands, and no task to type.</h2>
+      <p class="sub">Needs Docker for the local graph database, and a TypeScript or JavaScript repo. Your code never leaves your machine.</p>
     </div>
-  </section>
-
-  <!-- ---------------------------------------------------------- tools -->
-  <section id="tools">
-    <div class="shell">
-      <div class="section-head">
-        <span class="eyebrow">Ask the graph</span>
-        <h2>Your Agent Gets To Use It Too.</h2>
-        <p>
-          The same graph that judges edits will answer questions. Your agent stops guessing at grep
-          patterns and asks what the compiler already knows.
-        </p>
+    <div class="term rv" style="max-width:1000px;margin-inline:auto">
+      <div class="term-bar"><span class="dots"><i></i><i></i><i></i></span> your-repo</div>
+      <div class="term-body">
+        <div class="ln"><span class="who you">$</span><span class="said">npm i -g ichor-cli</span></div>
+        <div class="ln"><span class="who you">$</span><span class="said">ichor init &nbsp;&nbsp;<span class="said dim"># hooks for Claude Code and Codex</span></span></div>
+        <div class="ln"><span class="who you">$</span><span class="said">ichor up &nbsp;&nbsp;&nbsp;&nbsp;<span class="said dim"># local HydraDB, binds to 127.0.0.1</span></span></div>
+        <div class="ln"><span class="who you">$</span><span class="said">ichor watch &nbsp;<span class="said dim"># reads your repo, then follows the conversation</span></span></div>
+        <div class="sp"></div>
+        <div class="ln"><span class="who"></span><span class="said dim"><span class="ok">✓</span> Watching. Run your agent as usual — Ichor picks the task up from your prompts.</span></div>
       </div>
-      <div class="grid grid-3">
-        <div class="card">
-          <span class="num">ICHOR_FIND</span>
-          <h3>Where does this live?</h3>
-          <p>Describe it in plain words — "the place invites are created". It ranks your codebase's own names, types, routes and tables, and skips matches in comments and strings. It matches names rather than meaning, so use the words your code uses.</p>
-        </div>
-        <div class="card">
-          <span class="num">ICHOR_IMPACT</span>
-          <h3>What breaks if I change it?</h3>
-          <p>Callers, the endpoints that end up running it, the tables at stake, and every function depending on a type's shape. One call, no grep.</p>
-        </div>
-        <div class="card">
-          <span class="num">ICHOR_PATHS</span>
-          <h3>How is this table reached?</h3>
-          <p>Which endpoints, through which functions. Useful before adding a second way to write data that already has one. No file search can answer it.</p>
-        </div>
-      </div>
-      <p class="muted" style="margin-top:22px;max-width:70ch">
-        Asked <em>"what breaks if I delete the useAuth hook?"</em> on a real project, an agent
-        answered with <strong style="color:var(--fg);font-weight:400">one <code>ichor_impact</code> call and nothing else</strong> —
-        no grep, no file reads.
-      </p>
     </div>
-  </section>
-
-  <!-- ---------------------------------------------------------- proof -->
-  <section id="proof">
-    <div class="shell">
-      <div class="section-head">
-        <span class="eyebrow">Proof</span>
-        <h2>Measured On Somebody Else's Code.</h2>
-        <p>
-          The number that decides whether a tool like this survives is how often it interrupts work
-          you were right to do. Passing your own tests on your own demo proves nothing about it.
-        </p>
+    <div class="grid2 rv" style="margin-top:26px;max-width:1000px;margin-inline:auto">
+      <div class="cell">
+        <span class="kicker">No account</span>
+        <h3>Your code stays on your machine</h3>
+        <p class="small">HydraDB and MinIO run locally through Docker, every port binds to <span class="icode">127.0.0.1</span>, and there is no telemetry.</p>
       </div>
-
-      <div class="grid grid-3">
-        <div class="card">
-          <span class="num">FALSE ALARMS</span>
-          <div class="stat">12.8%</div>
-          <p class="stat-note">Share of edits a developer genuinely had to make that Ichor would have interrupted — about one in eight. Replayed through the real classifier, not estimated.</p>
-        </div>
-        <div class="card">
-          <span class="num">EVIDENCE</span>
-          <div class="stat">86</div>
-          <p class="stat-note">Files across 30 real commits from a real product. Each commit message is the task; the files it changed are the truth. Every file type, not just the ones Ichor reads.</p>
-        </div>
-        <div class="card">
-          <span class="num">SPEED</span>
-          <div class="stat">6s</div>
-          <p class="stat-note">To catch up after you edit a file in a 1,362-file codebase. The largest repo tested — 7,735 files — is read at Node's default heap.</p>
-        </div>
-      </div>
-
-      <p class="muted" style="margin-top:26px;max-width:74ch">
-        Every number here is reproducible from this repository. The measurement harness is in
-        <code>scripts/</code>, and the suite that matters most exists because six others passed while
-        eleven real bugs were live — they all ran against an eleven-file demo.
-      </p>
-    </div>
-  </section>
-
-  <!-- -------------------------------------------------------- install -->
-  <section id="install">
-    <div class="shell">
-      <div class="section-head">
-        <span class="eyebrow">Install</span>
-        <h2>Three Commands, And No Task To Type.</h2>
-        <p>
-          Needs Docker for the local graph database, and a TypeScript or JavaScript repo. Your code
-          never leaves your machine.
-        </p>
-      </div>
-      <div class="terminal">
-        <div class="terminal-bar">
-          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span style="margin-left:8px">your-repo</span>
-        </div>
-<div class="terminal-body"><span class="prompt">$</span> npm i -g ichor-cli
-<span class="prompt">$</span> ichor init          <span class="muted"># hooks for Claude Code and Codex</span>
-<span class="prompt">$</span> ichor up            <span class="muted"># local HydraDB, binds to 127.0.0.1</span>
-<span class="prompt">$</span> ichor watch         <span class="muted"># reads your repo, then follows the conversation</span>
-
-<span class="muted">Watching. Run your agent as usual — Ichor picks the task up from your prompts.</span></div>
-      </div>
-      <div class="grid grid-2" style="margin-top:26px">
-        <div class="card">
-          <span class="num">WORKS WITH</span>
-          <h3>Claude Code and Codex CLI</h3>
-          <p>Both get the full thing — challenges before the write lands, plus the graph tools. Cursor, Windsurf, Gemini CLI and Cline use the same adapter interface and are next.</p>
-        </div>
-        <div class="card">
-          <span class="num">NO ACCOUNT</span>
-          <h3>Your code stays on your machine</h3>
-          <p>HydraDB and MinIO run locally through Docker, every port binds to <code style="font-family:var(--mono);font-size:13px">127.0.0.1</code>, and there is no telemetry. Nothing is uploaded to run Ichor.</p>
-        </div>
-      </div>
-
-      <div class="keynote">
-        <span class="num">RECOMMENDED — UNLOCK THE JUDGE</span>
-        <h3>Add an OpenRouter key and Ichor can weigh an argument, not just the structure.</h3>
-        <p>
-          Every boundary, every verdict, every piece of evidence and all nine tools work with
-          <strong style="color:var(--fg);font-weight:400">no key at all</strong> — that is deliberate,
-          and it is why there is no signup. A key adds the one thing structure cannot do: when your
-          agent <em>argues</em> that an expansion is genuinely necessary, that argument gets weighed
-          against the evidence the graph produced, instead of the question coming to you.
-        </p>
-        <p>
-          <strong style="color:var(--fg);font-weight:400">It is cheap on purpose.</strong> A small
-          model, called only when an argument has actually been made — never on an ordinary edit —
-          and capped per task <em>and</em> per file. Exercising every path in Ichor end to end costs
-          well under a dollar, so a spare key with a couple of dollars on it is plenty.
-        </p>
-        <p style="margin-top:14px">
-          <code>$ ichor key sk-or-…</code> &nbsp;·&nbsp; keys from
-          <a href="https://openrouter.ai/keys" style="color:var(--acid)">openrouter.ai/keys</a>,
-          stored in <code>~/.ichor/</code> outside every repository so it cannot be committed by accident.
-        </p>
+      <div class="cell">
+        <span class="kicker">Optional</span>
+        <h3>A key lets it weigh an argument</h3>
+        <p class="small">Every boundary, verdict and tool works with no key. Add an OpenRouter key and, when your agent <i>argues</i> an expansion is necessary, that argument gets weighed against the evidence instead of the question coming to you.</p>
       </div>
     </div>
   </section>
 
-  <!-- --------------------------------------------------------- limits -->
-  <section id="limits">
-    <div class="shell">
-      <div class="section-head">
-        <span class="eyebrow">Honest limits</span>
-        <h2>What It Cannot Do.</h2>
-        <p>
-          A tool that claims to know where a task belongs should be precise about where it is blind.
-        </p>
-      </div>
-      <ul class="plain">
-        <li><strong style="color:var(--fg);font-weight:400">TypeScript and JavaScript only.</strong> Python is next. Nothing else is claimed.</li>
-        <li><strong style="color:var(--fg);font-weight:400">It still questions about one edit in eight</strong> that you were right to make. Measured, not estimated — and naming the file in your prompt is what makes it precise.</li>
-        <li><strong style="color:var(--fg);font-weight:400">A shell write cannot be challenged.</strong> Ichor hooks edit tools, so a file written by <code>cat &gt;</code> or a codegen script is invisible in the moment. It is named at the end of the turn instead, so silence never means "nobody looked".</li>
-        <li><strong style="color:var(--fg);font-weight:400">Ichor can be wrong.</strong> The boundary is an expectation, not a fact. When it cannot verify a justification it asks you rather than deciding — and it never blocks a prompt.</li>
-      </ul>
-      <p class="muted" style="margin-top:22px;max-width:74ch">
-        The longer list — memory ceilings, one database per repo, static-analysis blind spots — is in
-        the <a href="./docs.html" style="color:var(--acid)">docs</a>, where it belongs.
-      </p>
+  <hr class="rule" />
+
+  <!-- ======================================================= limits -->
+  <section class="in">
+    <div class="head rv" style="align-items:flex-start;text-align:left;margin-inline:0;margin-bottom:20px">
+      <span class="kicker">Honest limits</span>
+      <h2>What it cannot do.</h2>
+      <p class="sub">A tool that claims to know where a task belongs should be precise about where it is blind.</p>
     </div>
+    <div class="rows rv">
+      <div class="row-i"><p class="small"><b style="color:var(--ink)">TypeScript and JavaScript only.</b> Python is next. Nothing else is claimed.</p></div>
+      <div class="row-i"><p class="small"><b style="color:var(--ink)">It still questions about one edit in eight that you were right to make.</b> Measured, not estimated — naming the file in your prompt is what makes the boundary precise.</p></div>
+      <div class="row-i"><p class="small"><b style="color:var(--ink)">It understands one stack deeply.</b> Next.js App Router routes and Prisma models are what it reads. Pages Router routes and other ORMs are not in the graph yet, so on those codebases it sees the calls but not the endpoints or the data.</p></div>
+      <div class="row-i"><p class="small"><b style="color:var(--ink)">A shell write is challenged after it lands, not before.</b> An agent editing with <span class="icode">sed</span> or a heredoc fires no pre-write hook, so Ichor reads what changed on disk once the command finishes and asks then — before anything is built on top of it.</p></div>
+      <div class="row-i"><p class="small"><b style="color:var(--ink)">Ichor can be wrong.</b> The boundary is an expectation, not a fact. When it cannot verify a justification it asks you rather than deciding — and it never blocks a prompt.</p></div>
+    </div>
+    <p class="small rv" style="margin-top:18px">The longer list — memory ceilings, one database per repo, static-analysis blind spots — is in <a href="docs.html" style="color:var(--ink)">the docs</a>.</p>
   </section>
 
-</main>
-
-<footer>
-  <div class="shell">
-    <div class="footer-row">
-      <a class="brand" href="#top" style="font-size:17px"><span class="mark" aria-hidden="true"><svg viewBox="0 0 32 32"><rect x="0" y="0" width="14" height="14" rx="1.5"/><rect x="16" y="0" width="14" height="14" rx="1.5"/><rect x="0" y="16" width="14" height="14" rx="1.5"/><rect class="out" x="20" y="20" width="12" height="12" rx="1.5"/></svg></span>Ichor</a>
-      <span style="margin-left:auto"></span>
-      <a href="https://github.com/rohit-jsfreaky/ichor">GitHub</a>
-      <a href="https://github.com/hydra-db/hydradb">HydraDB</a>
-      <a href="https://hackhydra.hydradb.com/">Hack Hydra</a>
-      <a href="https://github.com/rohit-jsfreaky/ichor/blob/main/LICENSE">MIT</a>
+  <footer class="in">
+    <div class="foot">
+      <div style="display:flex;flex-direction:column;gap:10px;max-width:34ch">
+        <a class="brand" href="#top">
+          <span class="tile"><svg width="12" height="12" style="fill:#fff"><use href="#i-ichor"/></svg></span>
+          ichor
+        </a>
+        <p class="small">Make every scope expansion explicit while AI coding agents work.</p>
+        <p class="small" style="color:var(--faint)">MIT · Built on HydraDB for Hack Hydra 2026</p>
+      </div>
+      <div class="links">
+        <div class="grp">
+          <span class="kicker">Product</span>
+          <a href="#how">How it works</a>
+          <a href="#proof">Proof</a>
+          <a href="docs.html">Docs</a>
+        </div>
+        <div class="grp">
+          <span class="kicker">Source</span>
+          <a href="https://github.com/rohit-jsfreaky/ichor">GitHub</a>
+          <a href="https://www.npmjs.com/package/ichor-cli">npm</a>
+          <a href="https://github.com/rohit-jsfreaky/ichor/blob/main/LICENSE">MIT licence</a>
+        </div>
+        <div class="grp">
+          <span class="kicker">Built on</span>
+          <a href="https://github.com/hydra-db/hydradb">HydraDB</a>
+          <a href="https://hackhydra.hydradb.com/">Hack Hydra</a>
+        </div>
+      </div>
     </div>
-    <p class="footer-note">
-      Built on <a href="https://github.com/hydra-db/hydradb" style="color:var(--acid)">HydraDB</a>,
-      an object-store-native graph database, for Hack Hydra 2026. Ichor stores your code graph in a
-      local HydraDB instance — delete it and there is no product.
-    </p>
-  </div>
-</footer>
+  </footer>
 
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/lenis@1.1.20/dist/lenis.min.js"></script>
+<script>
+(function () {
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (!reduced && window.Lenis) {
+    var lenis = new Lenis({ duration: 1.05, smoothWheel: true, touchMultiplier: 1.6 });
+    (function raf(t) { lenis.raf(t); requestAnimationFrame(raf); })();
+    document.querySelectorAll('a[href^="#"]').forEach(function (a) {
+      a.addEventListener('click', function (e) {
+        var el = document.querySelector(a.getAttribute('href'));
+        if (!el) return;
+        e.preventDefault();
+        lenis.scrollTo(el, { offset: -24 });
+      });
+    });
+  }
+
+  var items = document.querySelectorAll('.rv');
+  if (reduced || !('IntersectionObserver' in window)) {
+    items.forEach(function (el) { el.classList.add('on'); });
+  } else {
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('on'); io.unobserve(e.target); } });
+    }, { rootMargin: '0px 0px -6% 0px', threshold: 0.06 });
+    items.forEach(function (el, i) { el.style.transitionDelay = Math.min(i % 3, 2) * 50 + 'ms'; io.observe(el); });
+  }
+
+  var btn = document.getElementById('copy'), cicon = document.getElementById('cicon');
+  var CHECK = '<path d="M20 6 9 17l-5-5"/>';
+  var COPY = '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>';
+  btn.addEventListener('click', function () {
+    navigator.clipboard.writeText('npm i -g ichor-cli').then(function () {
+      cicon.innerHTML = CHECK; cicon.style.opacity = '1';
+      setTimeout(function () { cicon.innerHTML = COPY; cicon.style.opacity = '.6'; }, 1600);
+    });
+  });
+})();
+</script>
 </body>
 </html>

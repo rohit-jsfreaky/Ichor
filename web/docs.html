@@ -4,357 +4,783 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Ichor — docs</title>
-<meta name="description" content="Install Ichor, point it at a TypeScript repo, and read what it decides. Setup, every command, every environment variable, and what works without an API key." />
+<meta name="description" content="Install Ichor, point it at a TypeScript repo, and read what it decides. Setup, every command, every tool, every environment variable, and what works without an API key." />
 <meta property="og:title" content="Ichor — docs" />
-<meta property="og:description" content="Setup, every command, every environment variable, and what works without an API key." />
+<meta property="og:description" content="Setup, every command, every tool, every environment variable, and what works without an API key." />
 <meta property="og:type" content="article" />
 
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='0' y='0' width='14' height='14' rx='1.5' fill='%23a8ff35'/%3E%3Crect x='16' y='0' width='14' height='14' rx='1.5' fill='%23a8ff35'/%3E%3Crect x='0' y='16' width='14' height='14' rx='1.5' fill='%23a8ff35'/%3E%3Crect x='20' y='20' width='12' height='12' rx='1.5' fill='%23ffb020'/%3E%3C/svg%3E" />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='0' y='0' width='14' height='14' rx='2' fill='%231A1918'/%3E%3Crect x='16' y='0' width='14' height='14' rx='2' fill='%231A1918'/%3E%3Crect x='0' y='16' width='14' height='14' rx='2' fill='%231A1918'/%3E%3Crect x='20' y='20' width='12' height='12' rx='2' fill='%23C89B3C'/%3E%3C/svg%3E" />
+<meta name="theme-color" content="#F7F6F4" />
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
 <style>
-  @font-face {
-    font-family: 'Geist Pixel Square';
-    src: url('https://cdn.jsdelivr.net/npm/geist@1.7.2/dist/fonts/geist-pixel/GeistPixel-Square.woff2') format('woff2');
-    font-display: swap;
-  }
-
+  /* Same tokens as index.html, deliberately duplicated rather than pulled into a
+     shared stylesheet: these are two static files with no build step, and a docs
+     page that silently loses its palette because a path moved is the worse bug. */
   :root {
-    --bg: #000;
-    --panel: #0a0a0a;
-    --fg: #fff;
-    --dim: rgba(255,255,255,.62);
-    --faint: rgba(255,255,255,.38);
-    --line: rgba(255,255,255,.12);
-    --acid: #a8ff35;
-    --acid-dim: #7fcc1e;
-    --warn: #ffb020;
-    --display: 'Geist Pixel Square', ui-monospace, monospace;
+    --ground:  #F7F6F4;
+    --col:     #FFFFFF;
+    --ink:     #191817;
+    --body:    #6E6B66;
+    --faint:   #9A968F;
+    --line:    rgba(25,24,23,.09);
+    --line-2:  rgba(25,24,23,.14);
+
+    --tint:    #EFE9DC;
+    --tint-2:  #F6F2E9;
+    --gold:    #C89B3C;
+
+    --term:    #171614;
+    --term-2:  #201E1B;
+    --term-fg: #E8E4DC;
+    --term-dim:rgba(232,228,220,.52);
+    --ok:      #A8FF35;
+
     --sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
-    --shell: 1120px;
+
+    /* Narrower than the landing page on purpose. Docs are one reading measure
+       plus a contents rail; at the landing page's 1400px the prose capped out at
+       78ch and left a third of the framed column empty, which reads as a mistake
+       rather than as breathing room. */
+    --shell: min(1180px, 94vw);
+    --pad:   clamp(22px, 3vw, 46px);
   }
 
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; scroll-padding-top: 88px; }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { overflow-x: clip; }
+  html { -webkit-text-size-adjust: 100%; scroll-padding-top: 84px; }
+
   body {
-    margin: 0; background: var(--bg); color: var(--fg);
-    font-family: var(--sans); font-size: 16px; line-height: 1.65;
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.6;
     -webkit-font-smoothing: antialiased;
   }
-  a { color: var(--acid); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  code, pre { font-family: var(--mono); }
 
-  .shell { width: 100%; max-width: var(--shell); margin: 0 auto; padding: 0 24px; }
+  ::selection { background: var(--tint); color: var(--ink); }
+  a { color: inherit; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: 4px; }
 
-  header {
-    position: sticky; top: 0; z-index: 20;
-    background: rgba(0,0,0,.86); backdrop-filter: blur(10px);
-    border-bottom: 1px solid var(--line);
+  .col {
+    max-width: var(--shell);
+    margin: 0 auto;
+    background: var(--col);
+    border-left: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+    min-height: 100vh;
   }
-  .nav { display: flex; align-items: center; justify-content: space-between; height: 64px; gap: 20px; }
-  .brand {
-    display: inline-flex; align-items: center; gap: 10px;
-    color: var(--fg); font-family: var(--display); font-size: 17px; letter-spacing: .02em;
+  .in { padding-inline: var(--pad); }
+
+  /* ---------------------------------------------------------------- type */
+
+  h1, h2, h3 { margin: 0; font-weight: 500; letter-spacing: -.021em; text-wrap: balance; }
+  h1 { font-size: clamp(28px, 3.4vw, 36px); line-height: 1.14; letter-spacing: -.028em; }
+  h2 { font-size: clamp(20px, 2.2vw, 24px); line-height: 1.24; }
+  h3 { font-size: 15.5px; line-height: 1.38; }
+  p  { margin: 0; }
+
+  .sub   { color: var(--body); font-size: 13.5px; line-height: 1.62; }
+  .lead  { color: var(--body); font-size: 15px; line-height: 1.6; }
+  .kicker {
+    font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--faint); font-weight: 500; font-family: var(--mono);
   }
-  .brand:hover { text-decoration: none; }
-  .mark { width: 17px; height: 17px; display: inline-block; }
-  .mark svg { width: 100%; height: 100%; fill: var(--acid); }
-  .mark .out { fill: var(--warn); }
-  .nav-links { display: flex; gap: 22px; font-size: 14px; overflow-x: auto; }
-  .nav-links a { color: var(--dim); white-space: nowrap; }
-  .nav-links a:hover { color: var(--fg); text-decoration: none; }
-  .nav-links a.here { color: var(--acid); }
 
-  .layout { display: grid; grid-template-columns: 210px minmax(0,1fr); gap: 48px; padding: 44px 0 96px; }
-  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; gap: 24px; } .toc { position: static; } }
-
-  .toc { position: sticky; top: 96px; align-self: start; font-size: 14px; }
-  .toc div { color: var(--faint); font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; margin: 0 0 10px; }
-  .toc a { display: block; color: var(--dim); padding: 4px 0; }
-  .toc a:hover { color: var(--fg); text-decoration: none; }
-
-  h1 { font-family: var(--display); font-size: clamp(30px, 5vw, 44px); line-height: 1.08; margin: 0 0 14px; letter-spacing: -.01em; }
-  h2 {
-    font-family: var(--display); font-size: 22px; line-height: 1.2;
-    margin: 52px 0 14px; padding-top: 22px; border-top: 1px solid var(--line);
+  .icode {
+    font-family: var(--mono); font-size: .9em;
+    background: var(--ground); border: 1px solid var(--line);
+    border-radius: 4px; padding: .1em .34em; white-space: nowrap;
   }
-  h3 { font-size: 16px; font-weight: 500; margin: 28px 0 8px; }
-  p { margin: 0 0 14px; color: var(--dim); }
-  p.lead { color: var(--fg); font-size: 18px; }
-  strong { color: var(--fg); font-weight: 500; }
 
-  pre {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-    padding: 16px 18px; overflow-x: auto; font-size: 13.5px; line-height: 1.7;
-    color: var(--dim); margin: 0 0 16px;
+  /* ---------------------------------------------------------------- nav */
+
+  .nav { position: sticky; top: 0; z-index: 30; background: rgba(255,255,255,.9); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+  .nav .row { display: flex; align-items: center; justify-content: space-between; height: 58px; }
+  .brand { display: inline-flex; align-items: center; gap: 9px; text-decoration: none; font-size: 14.5px; font-weight: 500; }
+  .brand .tile { width: 22px; height: 22px; border-radius: 6px; background: var(--ink); display: grid; place-items: center; }
+  .navlinks { display: flex; align-items: center; gap: 22px; }
+  .navlinks a { font-size: 13px; color: var(--body); text-decoration: none; }
+  .navlinks a:hover, .navlinks a.here { color: var(--ink); }
+  @media (max-width: 640px) { .navlinks a.sm-hide { display: none; } }
+
+  /* ---------------------------------------------------------------- masthead */
+
+  .mast { padding-top: 52px; padding-bottom: 40px; border-bottom: 1px solid var(--line); }
+  .mast .wrap { max-width: 62ch; display: flex; flex-direction: column; gap: 14px; }
+
+  /* ---------------------------------------------------------------- layout */
+
+  /* The contents rail is a hairline-separated column rather than a floating list,
+     so the page keeps the same vertical-rule language as the landing page. */
+  .layout { display: grid; grid-template-columns: 204px minmax(0, 1fr); align-items: start; }
+  .rail {
+    position: sticky; top: 58px; align-self: start;
+    padding: 34px var(--pad) 60px;
+    border-right: 1px solid var(--line);
   }
-  pre b { color: var(--acid); font-weight: 400; }
-  pre i { color: var(--faint); font-style: normal; }
-  pre u { color: var(--warn); text-decoration: none; }
-  p code, li code, td code { background: rgba(255,255,255,.06); border-radius: 4px; padding: 1px 5px; font-size: 13px; color: var(--fg); }
+  .rail .kicker { display: block; margin-bottom: 12px; }
+  .rail a {
+    display: flex; gap: 10px; align-items: baseline;
+    padding: 5px 0; font-size: 13px; color: var(--body); text-decoration: none;
+  }
+  .rail a .n { font-family: var(--mono); font-size: 10.5px; color: var(--faint); flex: none; }
+  .rail a:hover { color: var(--ink); }
+  .rail a.here { color: var(--ink); font-weight: 500; }
+  .rail a.here .n { color: var(--gold); }
 
-  .table-wrap { overflow-x: auto; margin: 0 0 18px; }
-  table { width: 100%; border-collapse: collapse; font-size: 14.5px; min-width: 520px; }
-  th, td { text-align: left; padding: 10px 14px 10px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { color: var(--faint); font-weight: 400; font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
-  td { color: var(--dim); }
-  td:first-child { color: var(--fg); white-space: nowrap; }
+  .doc { padding: 34px var(--pad) 96px; min-width: 0; }
+  .doc > section { max-width: 78ch; }
 
-  ul { margin: 0 0 16px; padding-left: 20px; color: var(--dim); }
-  li { margin: 0 0 8px; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .rail { position: static; border-right: 0; border-bottom: 1px solid var(--line); padding-bottom: 22px; }
+    .rail nav { display: flex; flex-wrap: wrap; gap: 2px 18px; }
+  }
+
+  /* ---------------------------------------------------------------- sections */
+
+  section + section { margin-top: 54px; padding-top: 34px; border-top: 1px solid var(--line); }
+  .sec-head { display: flex; flex-direction: column; gap: 9px; margin-bottom: 18px; }
+  .doc p + p { margin-top: 12px; }
+  .doc h3 { margin-top: 28px; margin-bottom: 7px; }
+  .doc ul { margin: 14px 0 0; padding-left: 18px; color: var(--body); font-size: 13.5px; line-height: 1.62; }
+  .doc li { margin-bottom: 10px; }
+  .doc li strong { color: var(--ink); font-weight: 500; }
+  strong { font-weight: 500; }
+  em { font-style: italic; }
+
+  /* ---------------------------------------------------------------- code */
+
+  .code { position: relative; margin-top: 16px; }
+  .term {
+    background: var(--term); border-radius: 10px; overflow: hidden;
+    box-shadow: 0 1px 2px rgba(25,24,23,.05), 0 16px 40px -28px rgba(25,24,23,.30);
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.68;
+    color: var(--term-fg);
+  }
+  .term-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 14px; background: var(--term-2);
+    color: var(--term-dim); font-size: 10.5px; letter-spacing: .02em;
+  }
+  .term-bar .dots { display: flex; gap: 5px; margin-right: 4px; }
+  .term-bar .dots i { width: 7px; height: 7px; border-radius: 50%; background: rgba(232,228,220,.16); }
+  .term pre { margin: 0; padding: 15px 16px 17px; overflow-x: auto; white-space: pre; }
+  .term b { color: var(--ok); font-weight: 400; }
+  .term i { color: var(--term-dim); font-style: normal; }
+  .term u { color: var(--gold); text-decoration: none; }
+  .term s { color: var(--term-dim); text-decoration: none; }
+
+  .cp {
+    position: absolute; top: 8px; right: 10px; z-index: 2;
+    height: 24px; padding: 0 9px; border-radius: 6px;
+    border: 1px solid rgba(232,228,220,.16); background: rgba(232,228,220,.06);
+    color: var(--term-dim); font-family: var(--mono); font-size: 10.5px;
+    cursor: pointer; transition: color .15s ease, border-color .15s ease;
+  }
+  .cp:hover { color: var(--term-fg); border-color: rgba(232,228,220,.34); }
+
+  /* ---------------------------------------------------------------- tables */
+
+  .tw { overflow-x: auto; margin-top: 16px; border: 1px solid var(--line); border-radius: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 520px; }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { color: var(--faint); font-weight: 500; font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; background: var(--ground); }
+  td { color: var(--body); }
+  td:first-child { color: var(--ink); white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+  td.txt { font-family: var(--sans); font-size: 13px; white-space: normal; }
+
+  /* ---------------------------------------------------------------- notes */
 
   .note {
-    border-left: 2px solid var(--acid); background: rgba(168,255,53,.04);
-    padding: 14px 18px; margin: 0 0 18px; border-radius: 0 6px 6px 0;
+    margin-top: 16px; padding: 14px 16px;
+    background: var(--tint-2); border: 1px solid var(--line);
+    border-radius: 10px; font-size: 13px; color: var(--body); line-height: 1.62;
   }
-  .note p:last-child { margin: 0; }
-  .warn { border-left-color: var(--warn); background: rgba(255,176,32,.05); }
+  .note strong { color: var(--ink); }
 
-  footer { border-top: 1px solid var(--line); padding: 28px 0 48px; color: var(--faint); font-size: 14px; }
+  /* ---------------------------------------------------------------- footer */
+
+  footer { border-top: 1px solid var(--line); padding: 34px var(--pad) 48px; }
+  .foot { display: flex; flex-wrap: wrap; gap: 14px 28px; justify-content: space-between; align-items: center; font-size: 12.5px; color: var(--body); }
+  .foot a { color: var(--body); text-decoration: none; }
+  .foot a:hover { color: var(--ink); }
 </style>
 </head>
 <body>
 
-<header>
-  <div class="shell nav">
-    <a class="brand" href="./index.html"><span class="mark" aria-hidden="true"><svg viewBox="0 0 32 32"><rect x="0" y="0" width="14" height="14" rx="1.5"/><rect x="16" y="0" width="14" height="14" rx="1.5"/><rect x="0" y="16" width="14" height="14" rx="1.5"/><rect class="out" x="20" y="20" width="12" height="12" rx="1.5"/></svg></span>Ichor</a>
-    <nav class="nav-links">
-      <a href="./index.html#problem">The problem</a>
-      <a href="./index.html#notagraph">The difference</a>
-      <a href="./index.html#proof">Proof</a>
-      <a class="here" href="./docs.html">Docs</a>
-      <a href="https://github.com/rohit-jsfreaky/ichor">GitHub</a>
-    </nav>
-  </div>
-</header>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-ichor" viewBox="0 0 32 32">
+    <rect x="0" y="0" width="14" height="14" rx="2"/><rect x="16" y="0" width="14" height="14" rx="2"/>
+    <rect x="0" y="16" width="14" height="14" rx="2"/><rect x="20" y="20" width="12" height="12" rx="2" opacity=".55"/>
+  </symbol>
+</svg>
 
-<main class="shell">
+<div class="col">
+
+  <nav class="nav in">
+    <div class="row">
+      <a class="brand" href="index.html">
+        <span class="tile"><svg width="12" height="12" style="fill:#fff"><use href="#i-ichor"/></svg></span>
+        ichor
+      </a>
+      <div class="navlinks">
+        <a class="sm-hide" href="index.html#how">How it works</a>
+        <a class="sm-hide" href="index.html#proof">Proof</a>
+        <a class="here" href="docs.html">Docs</a>
+        <a href="https://github.com/rohit-jsfreaky/ichor">GitHub &rarr;</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="mast in">
+    <div class="wrap">
+      <span class="kicker">Documentation</span>
+      <h1>Everything Ichor does, and where it stops.</h1>
+      <p class="lead">
+        Ichor watches your coding agent and questions the moment it goes past the job you gave
+        it. There is no task to type &mdash; it reads the job from what you already said.
+        Five minutes to a working install, and no account anywhere.
+      </p>
+    </div>
+  </div>
+
   <div class="layout">
 
-    <aside class="toc">
-      <div>On this page</div>
-      <a href="#install">Install</a>
-      <a href="#first">Your first task</a>
-      <a href="#reading">Reading a challenge</a>
-      <a href="#commands">Commands</a>
-      <a href="#key">The optional API key</a>
-      <a href="#tools">Tools for your agent</a>
-      <a href="#env">Environment variables</a>
-      <a href="#trouble">When something is wrong</a>
-      <a href="#limits">What it will not do</a>
+    <aside class="rail">
+      <span class="kicker">Contents</span>
+      <nav>
+        <a href="#install"><span class="n">01</span> Install</a>
+        <a href="#first"><span class="n">02</span> Your first task</a>
+        <a href="#switch"><span class="n">03</span> Switching jobs</a>
+        <a href="#reading"><span class="n">04</span> Reading a challenge</a>
+        <a href="#commands"><span class="n">05</span> Commands</a>
+        <a href="#tools"><span class="n">06</span> Tools for your agent</a>
+        <a href="#key"><span class="n">07</span> The optional key</a>
+        <a href="#env"><span class="n">08</span> Environment</a>
+        <a href="#trouble"><span class="n">09</span> Troubleshooting</a>
+        <a href="#limits"><span class="n">10</span> Limits</a>
+      </nav>
     </aside>
 
-    <article>
-      <h1>Docs</h1>
-      <p class="lead">Ichor watches your coding agent and questions the moment it goes past the job you gave it. There is no task to type — it reads the job from what you already said.</p>
-      <p>Everything below is the whole product. Five minutes to a working install, and no account anywhere.</p>
+    <article class="doc">
 
-      <h2 id="install">Install</h2>
+      <!-- ============================================================ 01 -->
+      <section id="install">
+        <div class="sec-head">
+          <span class="kicker">01 &middot; Install</span>
+          <h2>Three commands, and no task to type.</h2>
+        </div>
 
-      <p>You need <strong>Node 20 or newer</strong>, <strong>Docker</strong> running, and a <strong>TypeScript repository</strong> — Ichor is at its best on Next.js with Prisma, because it can then see your routes and your tables as well as your code.</p>
+        <p class="sub">
+          You need <strong>Node 20 or newer</strong>, <strong>Docker</strong> running, and a
+          <strong>TypeScript or JavaScript repository</strong>. Ichor is at its best on Next.js
+          with Prisma, because it can then see your routes and your tables as well as your code.
+        </p>
 
-<pre>npm i -g ichor-cli
+        <div class="code">
+          <button class="cp" data-copy="npm i -g ichor-cli">copy</button>
+          <div class="term">
+            <div class="term-bar"><span class="dots"><i></i><i></i><i></i></span> your-repo</div>
+<pre>  npm i -g ichor-cli
 
-cd your-repo
-<b>ichor init</b>     <i># installs the agent hooks, registers the tools, writes the database stack</i>
-<b>ichor up</b>       <i># starts HydraDB and MinIO in Docker, on localhost only</i>
-<b>ichor watch</b>    <i># reads your codebase, then follows the conversation</i></pre>
+  <b>ichor init</b>     <i># installs the agent hooks, registers the tools, writes the stack</i>
+  <b>ichor up</b>       <i># starts HydraDB and MinIO in Docker, bound to 127.0.0.1</i>
+  <b>ichor watch</b>    <i># reads your repo, then follows the conversation</i></pre>
+          </div>
+        </div>
 
-      <p><code>ichor init</code> writes into your repo and <em>merges</em> rather than overwrites — an existing <code>.claude/settings.json</code>, <code>.codex/hooks.json</code> or <code>.mcp.json</code> keeps everything it already had. It also adds <code>.ichor/</code> to your <code>.gitignore</code>, because that is where Ichor keeps its own state.</p>
+        <p class="sub" style="margin-top:16px">
+          <span class="icode">ichor init</span> writes into your repo and <em>merges</em> rather
+          than overwrites &mdash; an existing <span class="icode">.claude/settings.json</span>,
+          <span class="icode">.codex/hooks.json</span> or <span class="icode">.mcp.json</span>
+          keeps everything it already had. It also adds <span class="icode">.ichor/</span> to your
+          <span class="icode">.gitignore</span>, because that is where Ichor keeps its own state.
+        </p>
 
-      <p>The first read takes a while and only happens once: about <strong>19 seconds for 1,362 files</strong>, and 2m 21s for the largest repository tested (7,735 files). After that, catching up on your edits takes seconds.</p>
+        <p class="sub">
+          The first read happens once: about <strong>19 seconds for 1,362 files</strong>, and
+          2m 21s for the largest repository tested (7,735 files). After that, catching up on your
+          edits takes seconds.
+        </p>
 
-      <div class="note">
-        <p><strong>One database per repository.</strong> Projects never bleed into each other — that is tested with four loaded at once — but HydraDB cannot index the property Ichor uses to tell them apart, so every extra project makes queries slower. Three share one comfortably. More will not, so <code>ichor init</code> writes a database stack into each repo.</p>
-      </div>
+        <div class="note">
+          <strong>One database per repository.</strong> Projects never bleed into each other
+          &mdash; that is tested with four loaded at once &mdash; but HydraDB cannot index the
+          property Ichor uses to tell them apart, so every extra project makes queries slower.
+          Three share one comfortably. More will not, so <span class="icode">ichor init</span>
+          writes a database stack into each repo.
+        </div>
+      </section>
 
-      <h2 id="first">Your first task</h2>
+      <!-- ============================================================ 02 -->
+      <section id="first">
+        <div class="sec-head">
+          <span class="kicker">02 &middot; Your first task</span>
+          <h2>There is no command to describe the job.</h2>
+        </div>
 
-      <p>There is no command to describe the job. Open Claude Code or Codex in the repo and work normally.</p>
+        <p class="sub">
+          Open Claude Code or Codex in the repo and work normally. Ichor reads the boundary from
+          the prompt you were going to type anyway.
+        </p>
 
-<pre>&gt; fix the duplicate email crash in vendor onboarding
-  <b>[ichor]</b> task set — 14 functions, data: Vendor
+        <div class="code">
+          <div class="term">
+            <div class="term-bar"><span class="dots"><i></i><i></i><i></i></span> claude code</div>
+<pre><u>you  &gt;</u>  fix the duplicate email crash in vendor onboarding
+       <b>[ichor]</b> task set &mdash; 14 functions, data: Vendor
 
-  <i>…hours later, same conversation…</i>
+<i>       …hours later, same conversation…</i>
 
-&gt; now fix the rounding on billing invoices
-  <b>[ichor]</b> new task — 3 functions, data: Invoice</pre>
+<u>you  &gt;</u>  now fix the rounding on billing invoices
+       <b>[ichor]</b> new task &mdash; 3 functions, data: Invoice</pre>
+          </div>
+        </div>
 
-      <p>That second line is the part that matters. Nobody runs a CLI command between tasks, so a boundary set at 9am would still be policing vendor code at 2pm while you are deep in billing — questioning every edit until you switch the thing off.</p>
+        <p class="sub" style="margin-top:16px">
+          That second line is the part that matters. Nobody runs a CLI command between tasks, so
+          a boundary set at 9am would still be policing vendor code at 2pm while you are deep in
+          billing &mdash; questioning every edit until you switch the thing off.
+        </p>
 
-      <p>Ask a question and nothing moves. <em>"Where is link expiry enforced?"</em> changes no boundary, because you are not changing anything.</p>
+        <p class="sub">
+          Ask a question and nothing moves. <em>"Where is link expiry enforced?"</em> changes no
+          boundary, because you are not changing anything.
+          <span class="icode">ichor status</span> shows what Ichor decided at any point: what is
+          in scope, what it questioned, and what was written anyway.
+        </p>
+      </section>
 
-      <p><code>ichor status</code> shows what Ichor decided at any point: what is in scope, what it questioned, and what was written anyway.</p>
+      <!-- ============================================================ 03 -->
+      <section id="switch">
+        <div class="sec-head">
+          <span class="kicker">03 &middot; Switching jobs</span>
+          <h2>What actually moves the boundary.</h2>
+        </div>
 
-      <h2 id="reading">Reading a challenge</h2>
+        <p class="sub">
+          Every prompt is read against the boundary currently held, and lands in one of four
+          answers. Ambiguity always resolves to <em>change nothing</em>, because a boundary
+          redrawn for no reason is worse than one held a turn too long.
+        </p>
 
-      <p>When your agent is about to write something outside the job, it is stopped <em>before</em> the file exists, and told why:</p>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Your prompt</th><th>What happens</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="txt">Names a <strong>path</strong> or a <strong>symbol</strong> outright</td>
+                <td>The boundary is redrawn around it. <em>"fix the retry in <span class="icode">lib/billing/invoice.ts</span>"</em> &mdash; what you pointed at wins over everything else in the sentence.</td>
+              </tr>
+              <tr>
+                <td class="txt">Names a <strong>directory</strong> outside the boundary</td>
+                <td>The boundary <em>widens</em> to include it, and keeps what it already had. A word that merely happens to match a folder name can never destroy the real task.</td>
+              </tr>
+              <tr>
+                <td class="txt">Ordinary words, already inside the boundary</td>
+                <td>Nothing changes. This is most prompts, and it is the correct answer for them.</td>
+              </tr>
+              <tr>
+                <td class="txt">A wall of common words, or a pasted stack trace</td>
+                <td>Nothing changes. A term matching a hundred and thirty-five files is telling you it is an English word, not where the work is.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
-<pre><u>⚠ ichor: this looks like scope expansion.</u>
+        <p class="sub" style="margin-top:16px">
+          <span class="icode">ichor start "…"</span> names the task by hand. Detection still
+          reports what it saw, but it will never redraw a boundary you chose yourself.
+        </p>
+      </section>
+
+      <!-- ============================================================ 04 -->
+      <section id="reading">
+        <div class="sec-head">
+          <span class="kicker">04 &middot; Reading a challenge</span>
+          <h2>Every challenge cites something real.</h2>
+        </div>
+
+        <p class="sub">
+          When your agent is about to write something outside the job, it is stopped
+          <em>before</em> the file exists, and told why.
+        </p>
+
+        <div class="code">
+          <div class="term">
+            <div class="term-bar"><span class="dots"><i></i><i></i><i></i></span> the challenge</div>
+<pre><u>&#9888; ichor: this looks like scope expansion.</u>
 
   src/app/api/vendors/check-email/route.ts introduces a new POST endpoint at
   /api/vendors/check-email that reaches Vendor, but the task's existing path
   already reaches it:
 
-    <b>POST /api/vendors → POST → createVendor → Vendor</b>
+    <b>POST /api/vendors &rarr; createVendor &rarr; Vendor.email (unique)</b>
 
-  The existing POST /api/vendors already reaches Vendor, where Vendor.email is
-  already unique. Why is a separate POST endpoint required?</pre>
+  Why is a separate POST endpoint required?
+  <s>If it genuinely is:  ichor justify &lt;file&gt; "&lt;reason&gt;"</s></pre>
+          </div>
+        </div>
 
-      <p>Every challenge cites something real — a path through your code, a table, a count of callers. Ichor never says "this looks unrelated" without showing what it looked at.</p>
+        <p class="sub" style="margin-top:16px">
+          A path through your code, a table, a count of callers. Ichor never says "this looks
+          unrelated" without showing what it looked at.
+        </p>
 
-      <p>It is not a blocker. Your agent can explain why the change is needed and carry on, and Ichor asks <strong>once per file</strong>. A file that was questioned and then written anyway is remembered as exactly that, and is never later quoted back as proof that something else belongs.</p>
+        <p class="sub">
+          <strong>It is not a blocker.</strong> Your agent can answer with
+          <span class="icode">ichor justify</span> and have the argument weighed, or simply
+          explain and carry on &mdash; Ichor asks <strong>once per file</strong>. A file that was
+          questioned and then written anyway is remembered as exactly that, and is never later
+          quoted back as proof that something else belongs.
+        </p>
 
-      <p>Verdicts you will see in <code>ichor status</code> and the log:</p>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Verdict</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><td>EXPECTED</td><td>This is the job. Silent.</td></tr>
+              <tr><td>CONNECTED</td><td>Not the job, but genuinely joined to it &mdash; one call away, or working on the same table. Silent.</td></tr>
+              <tr><td>NOT_JUDGED</td><td>Not a file Ichor reads, so it has no opinion. Silent, and honest about why.</td></tr>
+              <tr><td>SUSPICIOUS</td><td>Outside the job, with evidence. You get asked.</td></tr>
+              <tr><td>HUMAN_REVIEW</td><td>Ichor cannot tell. It asks you rather than deciding.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-      <div class="table-wrap">
-      <table>
-        <thead><tr><th>Verdict</th><th>Meaning</th></tr></thead>
-        <tbody>
-          <tr><td>EXPECTED</td><td>This is the job. Silent.</td></tr>
-          <tr><td>CONNECTED</td><td>Not the job, but genuinely joined to it — one call away, or working on the same table. Silent.</td></tr>
-          <tr><td>NOT_JUDGED</td><td>Not a file Ichor reads, so it has no opinion. Silent, and honest about why.</td></tr>
-          <tr><td>SUSPICIOUS</td><td>Outside the job, with evidence. You get asked.</td></tr>
-          <tr><td>HUMAN_REVIEW</td><td>Ichor cannot tell. It asks you rather than deciding.</td></tr>
-        </tbody>
-      </table>
-      </div>
+      <!-- ============================================================ 05 -->
+      <section id="commands">
+        <div class="sec-head">
+          <span class="kicker">05 &middot; Commands</span>
+          <h2>Running it, and asking it things.</h2>
+        </div>
 
-      <h2 id="commands">Commands</h2>
+        <h3>Running it</h3>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td>ichor init</td><td>Install the hooks and tools in this repo, and write the database stack.</td></tr>
+              <tr><td>ichor up</td><td>Start HydraDB and MinIO locally.</td></tr>
+              <tr><td>ichor watch</td><td>Read the codebase and follow the conversation. The usual way to run it.</td></tr>
+              <tr><td>ichor start "…"</td><td>Name the task by hand. Detection still reports, but never redraws a boundary you chose.</td></tr>
+              <tr><td>ichor status</td><td>What is in scope, what was questioned, what was written anyway.</td></tr>
+              <tr><td>ichor stop</td><td>End the task and stop watching.</td></tr>
+              <tr><td>ichor key</td><td>Store your own OpenRouter key, or show whether one is set. Optional &mdash; see below.</td></tr>
+              <tr><td>ichor down</td><td>Stop the database, from any directory. <span class="icode">--wipe</span> also deletes the graph &mdash; that discards every project stored in it, not just this one, and Ichor says so before doing it.</td></tr>
+            </tbody>
+          </table>
+        </div>
 
-      <div class="table-wrap">
-      <table>
-        <thead><tr><th>Command</th><th>What it does</th></tr></thead>
-        <tbody>
-          <tr><td><code>ichor init</code></td><td>Install the hooks and tools in this repo, and write the database stack.</td></tr>
-          <tr><td><code>ichor up</code></td><td>Start HydraDB and MinIO locally.</td></tr>
-          <tr><td><code>ichor watch</code></td><td>Read the codebase and follow the conversation. The usual way to run it.</td></tr>
-          <tr><td><code>ichor start "…"</code></td><td>Name the task by hand. Detection still reports, but never redraws a boundary you chose.</td></tr>
-          <tr><td><code>ichor status</code></td><td>What is in scope, what was questioned, what was written anyway.</td></tr>
-          <tr><td><code>ichor key</code></td><td>Store your own OpenRouter key, or show whether one is set. Optional — see below.</td></tr>
-          <tr><td><code>ichor stop</code></td><td>End the task and stop watching.</td></tr>
-          <tr><td><code>ichor down</code></td><td>Stop the database, from any directory. <code>--wipe</code> also deletes the graph — that discards every project stored in it, not just this one, and Ichor says so before doing it.</td></tr>
-        </tbody>
-      </table>
-      </div>
+        <h3>Asking it things</h3>
+        <p class="sub">
+          The same answers your agent gets from the MCP tools, in a shell. These work whether or
+          not the workspace is trusted, which the MCP path does not.
+        </p>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Command</th><th>What it answers</th></tr></thead>
+            <tbody>
+              <tr><td>ichor find &lt;words…&gt;</td><td>Where does this live? A plain description instead of a grep pattern.</td></tr>
+              <tr><td>ichor impact &lt;symbol&gt;</td><td>What else is affected if this function or type changes.</td></tr>
+              <tr><td>ichor callers &lt;symbol&gt;</td><td>What calls this function, and from which endpoints.</td></tr>
+              <tr><td>ichor paths &lt;model&gt;</td><td>How the app reaches a table, and through what. <span class="icode">--route</span> narrows it.</td></tr>
+              <tr><td>ichor check &lt;file&gt;</td><td>Is this file part of the current task, and why.</td></tr>
+              <tr><td>ichor justify &lt;file&gt; "…"</td><td>Argue that a file outside the task is genuinely required, and have it weighed.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-      <h2 id="key">The optional API key</h2>
+      <!-- ============================================================ 06 -->
+      <section id="tools">
+        <div class="sec-head">
+          <span class="kicker">06 &middot; Tools for your agent</span>
+          <h2>Half of Ichor is not policing at all.</h2>
+        </div>
 
-      <p><strong>Ichor works fully without one.</strong> Every boundary, every challenge, every piece of evidence and all nine tools your agent can call need no key and make no outbound request. Your code never leaves your machine.</p>
+        <p class="sub">
+          These exist because your agent is about to grep for something the graph already knows.
+          In a real session it searched for five words, got <strong>116 hits</strong>, and read
+          <strong>six entire files</strong> to work out where the task lived. Ichor had the answer
+          in <strong>14ms</strong>.
+        </p>
 
-      <p>A key adds exactly one thing. When your agent <em>argues</em> that an expansion is genuinely necessary, that argument can be weighed against the evidence the graph produced. Without a key, an argument Ichor cannot verify comes to <em>you</em> instead of being granted — which is a reasonable default, not a broken feature.</p>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Tool</th><th>What it answers</th></tr></thead>
+            <tbody>
+              <tr><td>ichor_find</td><td>Where does X live? Describe it in plain words &mdash; no need to guess a name.</td></tr>
+              <tr><td>ichor_impact</td><td>What breaks if I change this? Callers, endpoints, tables at stake.</td></tr>
+              <tr><td>ichor_callers</td><td>Who reaches this function, and from which endpoints.</td></tr>
+              <tr><td>ichor_paths</td><td>How the app reaches a table, and through what.</td></tr>
+              <tr><td>ichor_task_status</td><td>Is there an active task, and what is in it.</td></tr>
+              <tr><td>ichor_get_scope</td><td>The task neighbourhood, with distances.</td></tr>
+              <tr><td>ichor_check_change</td><td>Classify a file before writing it.</td></tr>
+              <tr><td>ichor_explain</td><td>Why this verdict, with the paths behind it.</td></tr>
+              <tr><td>ichor_request_scope_expansion</td><td>Argue for the boundary to grow.</td></tr>
+            </tbody>
+          </table>
+        </div>
 
-<pre><b>ichor key</b> <i>sk-or-…</i>        <i># get one at https://openrouter.ai/keys</i>
-<b>ichor key</b>                 <i># is one set, and where did it come from?</i>
-<b>ichor key --remove</b>        <i># delete it</i></pre>
+        <p class="sub" style="margin-top:16px">
+          These search <em>structure</em>, not text: they rank the repository's own declarations
+          and skip matches in comments and strings. They match <em>names</em>, not meaning
+          &mdash; a description sharing no vocabulary with the code will not find it.
+        </p>
+      </section>
 
-      <p>The key is checked with OpenRouter before it is stored, so a truncated paste is caught immediately rather than turning into a feature that quietly does nothing.</p>
+      <!-- ============================================================ 07 -->
+      <section id="key">
+        <div class="sec-head">
+          <span class="kicker">07 &middot; The optional key</span>
+          <h2>Ichor works fully without one.</h2>
+        </div>
 
-      <div class="note">
-        <p><strong>Where it goes.</strong> <code>~/.ichor/credentials.json</code>, in your home directory, readable only by you — deliberately <em>outside</em> every repository, so it cannot be committed by accident. An exported <code>ICHOR_OPENROUTER_KEY</code> always wins over the stored one, which is what you want in CI.</p>
-      </div>
+        <p class="sub">
+          Every boundary, every challenge, every piece of evidence and all nine tools your agent
+          can call need no key and make no outbound request. Your code never leaves your machine.
+        </p>
 
-      <p>Cost is bounded by design. The Judge is never consulted on an ordinary edit — only when an argument has actually been made — and it is capped per task <em>and</em> per file, so a long session cannot run away with your credit.</p>
+        <p class="sub">
+          A key adds exactly one thing. When your agent <em>argues</em> that an expansion is
+          genuinely necessary, that argument can be weighed against the evidence the graph
+          produced. Without a key, an argument Ichor cannot verify comes to <em>you</em> instead
+          of being granted &mdash; which is a reasonable default, not a broken feature.
+        </p>
 
-      <h2 id="tools">Tools for your agent</h2>
+        <div class="code">
+          <div class="term">
+            <div class="term-bar"><span class="dots"><i></i><i></i><i></i></span> optional</div>
+<pre>  <b>ichor key</b> <i>sk-or-…</i>        <i># get one at https://openrouter.ai/keys</i>
+  <b>ichor key</b>                 <i># is one set, and where did it come from?</i>
+  <b>ichor key --remove</b>        <i># delete it</i></pre>
+          </div>
+        </div>
 
-      <p>Half of Ichor is not policing at all. These exist because your agent is about to grep for something the graph already knows. In a real session it searched for five words, got <strong>116 hits</strong>, and read <strong>six entire files</strong> to work out where the task lived. Ichor had the answer in <strong>14ms</strong>.</p>
+        <p class="sub" style="margin-top:16px">
+          The key is checked with OpenRouter before it is stored, so a truncated paste is caught
+          immediately rather than turning into a feature that quietly does nothing.
+        </p>
 
-      <div class="table-wrap">
-      <table>
-        <thead><tr><th>Tool</th><th>What it answers</th></tr></thead>
-        <tbody>
-          <tr><td><code>ichor_find</code></td><td>Where does X live? Describe it in plain words — no need to guess a name.</td></tr>
-          <tr><td><code>ichor_impact</code></td><td>What breaks if I change this? Callers, endpoints, tables at stake.</td></tr>
-          <tr><td><code>ichor_callers</code></td><td>Who reaches this function, and from which endpoints.</td></tr>
-          <tr><td><code>ichor_paths</code></td><td>How the app reaches a table, and through what.</td></tr>
-          <tr><td><code>ichor_task_status</code></td><td>Is there an active task, and what is in it.</td></tr>
-          <tr><td><code>ichor_get_scope</code></td><td>The task neighbourhood, with distances.</td></tr>
-          <tr><td><code>ichor_check_change</code></td><td>Classify a file before writing it.</td></tr>
-          <tr><td><code>ichor_explain</code></td><td>Why this verdict, with the paths behind it.</td></tr>
-          <tr><td><code>ichor_request_scope_expansion</code></td><td>Argue for the boundary to grow.</td></tr>
-        </tbody>
-      </table>
-      </div>
+        <div class="note">
+          <strong>Where it goes.</strong> <span class="icode">~/.ichor/credentials.json</span>,
+          in your home directory &mdash; deliberately <em>outside</em> every repository, so it
+          cannot be committed by accident. An exported
+          <span class="icode">ICHOR_OPENROUTER_KEY</span> always wins over the stored one, which
+          is what you want in CI.
+        </div>
 
-      <p>These search <em>structure</em>, not text: they rank the repository's own declarations and skip matches in comments and strings. They match <em>names</em>, not meaning — a description sharing no vocabulary with the code will not find it.</p>
+        <p class="sub" style="margin-top:16px">
+          Cost is bounded by design. The Judge is never consulted on an ordinary edit &mdash; only
+          when an argument has actually been made &mdash; and it is capped per task <em>and</em>
+          per file, so a long session cannot run away with your credit.
+        </p>
+      </section>
 
-      <h2 id="env">Environment variables</h2>
+      <!-- ============================================================ 08 -->
+      <section id="env">
+        <div class="sec-head">
+          <span class="kicker">08 &middot; Environment</span>
+          <h2>None of these are required.</h2>
+        </div>
 
-      <p>None of these are required. Ichor picks sensible values and <code>ichor init</code> writes the rest.</p>
+        <p class="sub">
+          Ichor picks sensible values and <span class="icode">ichor init</span> writes the rest.
+        </p>
 
-      <div class="table-wrap">
-      <table>
-        <thead><tr><th>Variable</th><th>Default</th><th>Purpose</th></tr></thead>
-        <tbody>
-          <tr><td><code>ICHOR_OPENROUTER_KEY</code></td><td>—</td><td>Your OpenRouter key. <code>OPENROUTER_API_KEY</code> and <code>OPENROUTER_KEY</code> are also read. Beats the stored key.</td></tr>
-          <tr><td><code>ICHOR_JUDGE_MODEL</code></td><td><code>openai/gpt-5-mini</code></td><td>Which model weighs an argument. A cheap fallback is always tried second.</td></tr>
-          <tr><td><code>ICHOR_JUDGE_MAX_PER_TASK</code></td><td>bounded</td><td>How many times one task may consult the Judge.</td></tr>
-          <tr><td><code>ICHOR_JUDGE_MAX_PER_FILE</code></td><td>bounded</td><td>How many times one file may.</td></tr>
-          <tr><td><code>ICHOR_JUDGE_TIMEOUT_MS</code></td><td><code>20000</code></td><td>Give up on the model and fall back to the graph-only verdict.</td></tr>
-          <tr><td><code>ICHOR_HYDRA_URL</code></td><td><code>bolt://127.0.0.1:7687</code></td><td>Where HydraDB is listening.</td></tr>
-          <tr><td><code>ICHOR_HYDRA_TOKEN</code></td><td>generated</td><td>Auth token for the local database. Written by <code>ichor up</code>.</td></tr>
-          <tr><td><code>ICHOR_HYDRA_NAMESPACE</code></td><td>default</td><td>Namespace inside HydraDB.</td></tr>
-          <tr><td><code>ICHOR_DEBUG</code></td><td>—</td><td><code>1</code> mirrors the hook log to stderr while you work.</td></tr>
-        </tbody>
-      </table>
-      </div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Variable</th><th>Default</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td>ICHOR_OPENROUTER_KEY</td><td>&mdash;</td><td>Your OpenRouter key. <span class="icode">OPENROUTER_API_KEY</span> and <span class="icode">OPENROUTER_KEY</span> are also read. Beats the stored key.</td></tr>
+              <tr><td>ICHOR_JUDGE_MODEL</td><td>openai/gpt-5-mini</td><td>Which model weighs an argument. A cheap fallback is always tried second.</td></tr>
+              <tr><td>ICHOR_JUDGE_MAX_PER_TASK</td><td>bounded</td><td>How many times one task may consult the Judge.</td></tr>
+              <tr><td>ICHOR_JUDGE_MAX_PER_FILE</td><td>bounded</td><td>How many times one file may.</td></tr>
+              <tr><td>ICHOR_JUDGE_TIMEOUT_MS</td><td>20000</td><td>Give up on the model and fall back to the graph-only verdict.</td></tr>
+              <tr><td>ICHOR_HYDRA_URL</td><td>bolt://127.0.0.1:7687</td><td>Where HydraDB is listening.</td></tr>
+              <tr><td>ICHOR_HYDRA_TOKEN</td><td>generated</td><td>Auth token for the local database. Written by <span class="icode">ichor up</span>.</td></tr>
+              <tr><td>ICHOR_HYDRA_NAMESPACE</td><td>default</td><td>Namespace inside HydraDB.</td></tr>
+              <tr><td>ICHOR_DEBUG</td><td>&mdash;</td><td><span class="icode">1</span> mirrors the hook log to stderr while you work.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-      <h2 id="trouble">When something is wrong</h2>
+      <!-- ============================================================ 09 -->
+      <section id="trouble">
+        <div class="sec-head">
+          <span class="kicker">09 &middot; Troubleshooting</span>
+          <h2>When something looks wrong.</h2>
+        </div>
 
-      <h3>Ichor said nothing at all</h3>
-      <p>It fails open on purpose: no task, no database, a parse error, a timeout — every one of those allows the edit. A tool that blocks work when it breaks gets uninstalled within the hour.</p>
-      <p>So it always writes down why. <code>.ichor/hook.log</code> in your repo has one line per decision, and <code>ichor status</code> shows the current state. If Ichor was quiet, that log says whether it decided to be quiet or never ran.</p>
+        <h3>Ichor said nothing at all</h3>
+        <p class="sub">
+          It fails open on purpose: no task, no database, a parse error, a timeout &mdash; every
+          one of those allows the edit. A tool that blocks work when it breaks gets uninstalled
+          within the hour.
+        </p>
+        <p class="sub">
+          So it always writes down why. <span class="icode">.ichor/hook.log</span> in your repo
+          has one line per decision, and <span class="icode">ichor status</span> shows the current
+          state. A turn where the graph could not be reached says so to your agent as well, rather
+          than leaving the session quietly unwatched.
+        </p>
 
-      <h3>"HydraDB is not answering on the Bolt port"</h3>
-      <p><code>ichor up</code>, and give Docker a moment. <code>ichor status</code> will tell you once it is reachable.</p>
+        <h3>"HydraDB is not answering on the Bolt port"</h3>
+        <p class="sub">
+          <span class="icode">ichor up</span>, and give Docker a moment.
+          <span class="icode">ichor status</span> will tell you once it is reachable. After a
+          container restart the first query can be slow enough to time out; the next one succeeds.
+        </p>
 
-      <h3>The agent still asks permission for Ichor's own tools</h3>
-      <p>Claude Code ignores <code>permissions.allow</code> from a project's settings until the workspace is trusted, and untrusted is the default for a fresh clone. Open <code>claude</code> interactively in the repo once and accept the trust dialog. The hooks and every verdict work either way — only the pre-approval waits on trust.</p>
+        <h3>The agent still asks permission for Ichor's own tools</h3>
+        <p class="sub">
+          Claude Code ignores <span class="icode">permissions.allow</span> from a project's
+          settings until the workspace is trusted, and untrusted is the default for a fresh clone.
+          Open <span class="icode">claude</span> interactively in the repo once and accept the
+          trust dialog. The hooks and every verdict work either way &mdash; and the shell commands
+          in section 05 answer the same questions without any of this.
+        </p>
 
-      <h3>It never notices when I switch tasks</h3>
-      <p>Name the file you mean. Measured on the largest repository tested (7,735 files): an ordinary sentence matches thousands of files, so a prompt built only of common words cannot say where you have moved to. A prompt that <em>names</em> a path does, however incidental the rest of the sentence — <em>"fix the retry in <code>backend/src/services/x/y.ts</code>"</em> is noticed, <em>"fix the retry"</em> is not. <code>ichor start "…"</code> always works.</p>
+        <h3>It did not notice when I switched tasks</h3>
+        <p class="sub">
+          Name the file or the folder you mean. An ordinary sentence of common words matches
+          thousands of files on a large repo, so it cannot say where you have moved to.
+          <em>"fix the retry in <span class="icode">backend/src/services/x/y.ts</span>"</em> is
+          noticed; <em>"fix the retry"</em> is not.
+          <span class="icode">ichor start "…"</span> always works.
+        </p>
 
-      <h3>Codex runs no hooks</h3>
-      <p>Codex asks you to trust a hook file the first time it sees one, and <code>codex exec</code> cannot show that prompt — so in non-interactive mode it silently runs none. Use interactive <code>codex</code> and approve it once. That is Codex's behaviour rather than Ichor's, but it is worth knowing before concluding the integration is broken.</p>
+        <h3>Codex runs no hooks</h3>
+        <p class="sub">
+          Codex asks you to trust a hook file the first time it sees one, and
+          <span class="icode">codex exec</span> cannot show that prompt &mdash; so in
+          non-interactive mode it silently runs none. Use interactive
+          <span class="icode">codex</span> and approve it once. That is Codex's behaviour rather
+          than Ichor's, but it is worth knowing before concluding the integration is broken.
+        </p>
 
-      <h3>It questioned something it should not have</h3>
-      <p>Measured on 30 real commits from a real product, that happens on about <strong>one edit in eight</strong>. Tell your agent why the change is needed and carry on — Ichor asks once per file. If a boundary is plainly wrong, <code>ichor start "…"</code> names the task yourself and detection stops redrawing it.</p>
+        <h3>It questioned something it should not have</h3>
+        <p class="sub">
+          Measured on 30 real commits from a real product, that happens on about
+          <strong>one edit in eight</strong>. Answer with
+          <span class="icode">ichor justify</span>, or tell your agent why and carry on &mdash;
+          Ichor asks once per file. If a boundary is plainly wrong,
+          <span class="icode">ichor start "…"</span> names the task yourself and detection stops
+          redrawing it.
+        </p>
+      </section>
 
-      <h2 id="limits">What it will not do</h2>
+      <!-- ============================================================ 10 -->
+      <section id="limits">
+        <div class="sec-head">
+          <span class="kicker">10 &middot; Limits</span>
+          <h2>What it cannot do.</h2>
+        </div>
 
-      <ul>
-        <li><strong>TypeScript and JavaScript only.</strong> Python is next. Nothing else is claimed.</li>
-        <li><strong>Name the file you mean.</strong> A prompt of common words is matched on those words, and on a large repo that reaches wider than the job does — which means fewer challenges, not more. Naming a path scopes the boundary to that file and its graph neighbours instead: measured on the 1,362-file repository, 18 files of guesswork down to the 1 you pointed at. A bare filename has to be unique in the repo to count.</li>
-        <li><strong>Shell writes cannot be challenged, only accounted for.</strong> Ichor hooks the agent's edit tools, so a file written by <code>cat &gt;</code>, a codegen script or your own editor is invisible at the moment it happens. At the end of the turn Ichor names anything that changed without ever reaching a verdict, so silence means <em>nothing was out of scope</em> rather than <em>Ichor was never asked</em>.</li>
-        <li><strong>Static analysis, and it says so.</strong> Dynamic dispatch and runtime-constructed calls cannot be seen, so results are a floor and never a ceiling. A call Ichor cannot resolve is counted and reported, never guessed — on a 1,362-file repo that was 7,178 call sites it declined to invent an edge for.</li>
-      </ul>
+        <p class="sub">
+          A tool that claims to know where a task belongs should be precise about where it is
+          blind.
+        </p>
 
-      <p>
-        Smaller ones, for completeness: a retrieval call gives up after 1.5 seconds and hands the
-        question to your agent's own search; the graph is rebuilt between turns, so within a single
-        turn Ichor can be a few edits behind; and two agent sessions in one checkout share a
-        boundary, with the newer taking it over.
-      </p>
+        <ul>
+          <li><strong>TypeScript and JavaScript only.</strong> Python is next. Nothing else is claimed.</li>
+          <li><strong>It understands one stack deeply.</strong> Next.js App Router routes and Prisma models are what it reads. <strong>Pages Router routes and other ORMs are not in the graph yet</strong>, so on those codebases Ichor sees the calls but not the endpoints or the tables &mdash; and <span class="icode">ichor paths</span> answers from the endpoints it does have.</li>
+          <li><strong>It still questions about one edit in eight that you were right to make.</strong> Measured, not estimated. Naming the file in your prompt is what makes the boundary precise: on the 1,362-file repository, 18 files of guesswork down to the 1 you pointed at.</li>
+          <li><strong>A shell write is challenged after it lands, not before.</strong> Ichor hooks the agent's edit tools, so a file written by <span class="icode">cat &gt;</span>, a heredoc or your own editor has no pre-write hook. At the end of the command Ichor reads what changed on disk and asks then &mdash; before anything is built on top of it.</li>
+          <li><strong>Static analysis, and it says so.</strong> Dynamic dispatch and runtime-constructed calls cannot be seen, so results are a floor and never a ceiling. A call Ichor cannot resolve is counted and reported, never guessed &mdash; on a 1,362-file repo that was 7,178 call sites it declined to invent an edge for.</li>
+          <li><strong>Ichor can be wrong.</strong> The boundary is an expectation, not a fact. When it cannot verify a justification it asks you rather than deciding &mdash; and it never blocks a prompt.</li>
+        </ul>
 
-      <div class="note warn">
-        <p>Ichor can be wrong. When it cannot validate a justification it asks you, rather than deciding for you.</p>
-      </div>
+        <p class="sub" style="margin-top:16px">
+          Smaller ones, for completeness: a retrieval call gives up after 1.5 seconds and hands the
+          question to your agent's own search; the graph is rebuilt between turns, so within a
+          single turn Ichor can be a few edits behind; and two agent sessions in one checkout share
+          a boundary, with the newer taking it over.
+        </p>
+      </section>
+
     </article>
   </div>
-</main>
 
-<footer>
-  <div class="shell">
-    Ichor · MIT · built on <a href="https://github.com/hydra-db/hydradb">HydraDB</a> for <a href="https://hackhydra.hydradb.com/">Hack Hydra</a> 2026 ·
-    <a href="https://github.com/rohit-jsfreaky/ichor">source</a>
-  </div>
-</footer>
+  <footer>
+    <div class="foot">
+      <span>Ichor &middot; MIT &middot; built on <a href="https://github.com/hydra-db/hydradb">HydraDB</a> for <a href="https://hackhydra.hydradb.com/">Hack Hydra</a> 2026</span>
+      <span>
+        <a href="index.html">Home</a> &nbsp;&middot;&nbsp;
+        <a href="https://github.com/rohit-jsfreaky/ichor">GitHub</a> &nbsp;&middot;&nbsp;
+        <a href="https://www.npmjs.com/package/ichor-cli">npm</a>
+      </span>
+    </div>
+  </footer>
 
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/lenis@1.1.20/dist/lenis.min.js"></script>
+<script>
+(function () {
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var lenis = null;
+
+  if (!reduced && window.Lenis) {
+    lenis = new Lenis({ duration: 1.05, smoothWheel: true, touchMultiplier: 1.6 });
+    (function raf(t) { lenis.raf(t); requestAnimationFrame(raf); })();
+    window.lenis = lenis;
+  }
+
+  document.querySelectorAll('a[href^="#"]').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      var el = document.querySelector(a.getAttribute('href'));
+      if (!el) return;
+      e.preventDefault();
+      if (lenis) lenis.scrollTo(el, { offset: -76 });
+      else el.scrollIntoView({ behavior: 'smooth' });
+      history.replaceState(null, '', a.getAttribute('href'));
+    });
+  });
+
+  /* copy buttons on the code blocks */
+  document.querySelectorAll('.cp').forEach(function (b) {
+    b.addEventListener('click', function () {
+      navigator.clipboard.writeText(b.getAttribute('data-copy')).then(function () {
+        var was = b.textContent;
+        b.textContent = 'copied';
+        setTimeout(function () { b.textContent = was; }, 1600);
+      });
+    });
+  });
+
+  /* which section am I in — the rail marks it */
+  var links = {}, sections = [];
+  document.querySelectorAll('.rail a').forEach(function (a) {
+    var id = a.getAttribute('href').slice(1);
+    links[id] = a;
+    var s = document.getElementById(id);
+    if (s) sections.push(s);
+  });
+  if ('IntersectionObserver' in window && sections.length) {
+    var seen = {};
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { seen[e.target.id] = e.isIntersecting; });
+      var current = null;
+      sections.forEach(function (s) { if (seen[s.id] && !current) current = s.id; });
+      if (!current) return;
+      Object.keys(links).forEach(function (id) { links[id].classList.toggle('here', id === current); });
+    }, { rootMargin: '-70px 0px -60% 0px' });
+    sections.forEach(function (s) { io.observe(s); });
+  }
+})();
+</script>
 </body>
 </html>

@@ -111,3 +111,6 @@ FIX-PLAN.md
 
 # ---------------------------------------------------------------- npm artifacts
 *.tgz
+
+# playwright-mcp scratch output (screenshots, snapshots)
+.playwright-mcp/

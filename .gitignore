@@ -100,6 +100,14 @@ BUGS.md
 TASKS.md
 PROJECT_FINAL.md
 SCOPE.md
+FIX-PLAN.md
+
+# REGRESSION-2026-08-19.md is deliberately NOT here, for the same reason as
+# docs/MEASUREMENTS.md: the README links to it. Every finding in it carries a
+# FIXED or DEFERRED resolution line, so it reads as the record of a test round
+# rather than as a stale claim — which is the thing the rule above guards against.
+# If it should stay internal, ignore it AND drop the link from the README's
+# "What it cannot do" section, or the link breaks on GitHub and on npm.
 
 # ---------------------------------------------------------------- npm artifacts
 *.tgz

@@ -266,6 +266,19 @@ export function classifyPrompt(
   const focusedOutside: string[] = [];
   /** Where the focused terms land — the footprint the guard actually judges. */
   const focusedFiles = new Set<string>();
+  /**
+   * How many places each focused term landed in, so the reason can cite the
+   * sharpest ones.
+   *
+   * A term is focused if it lands in few places, but "few" spans a wide range —
+   * and a word that matches two files by accident is not the word that explains a
+   * verdict. Observed on a real repo: a correct switch was reported as
+   * `new ground (different)`, naming a filler word from "different job now" that
+   * happened to be rare, while `registry` — the actual subject — went unmentioned.
+   * The verdict was right and the explanation was useless, which for the log that
+   * answers "why did Ichor do that" is its own kind of wrong.
+   */
+  const focusedPlaces = new Map<string, number>();
 
   for (const term of terms) {
     let insideCount = 0;
@@ -300,6 +313,7 @@ export function classifyPrompt(
       const places = new Set(filesForTerm);
       if (places.size <= FOCUSED_TERM_PLACES) {
         focusedOutside.push(term);
+        focusedPlaces.set(term, places.size);
         for (const f of places) focusedFiles.add(f);
       }
       for (const f of filesForTerm) outsideFiles.add(f);
@@ -449,10 +463,18 @@ export function classifyPrompt(
   if (outsideHits.length === 0) {
     return { ...base, verdict: 'SAME', reason: `stays inside the boundary (${insideHits.join(', ')})` };
   }
-  // Cite the FOCUSED terms: those are the ones that decided it, and a log line
-  // naming `doc` when the answer came from `limiter` is a log line that misleads
-  // whoever reads it next.
-  const pointing = (focusedOutside.length ? focusedOutside : outsideHits).slice(0, 4).join(', ');
+  // Cite the FOCUSED terms, sharpest first: those are the ones that decided it,
+  // and a log line naming `doc` when the answer came from `limiter` is a log line
+  // that misleads whoever reads it next.
+  const pointing = (
+    focusedOutside.length
+      ? [...focusedOutside].sort(
+          (a, b) => (focusedPlaces.get(a) ?? 0) - (focusedPlaces.get(b) ?? 0) || a.localeCompare(b),
+        )
+      : outsideHits
+  )
+    .slice(0, 4)
+    .join(', ');
   if (insideHits.length === 0) {
     return { ...base, verdict: 'NEW', reason: `points only outside the boundary (${pointing})` };
   }

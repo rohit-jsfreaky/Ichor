@@ -348,3 +348,6 @@ ground-truth harness re-run and that repository is not currently on the machine:
   the demo and may be model-dependent.
 - **Stats after an incremental refresh describe only the delta** — a refreshed `facts.json`
   reported 139 call sites and 4 unresolved beside 4,034 whole-repo edges.
+- **A rare filler word counts as a "focused" term**, because the rule measures rarity rather than
+  meaningfulness. Pre-existing, not introduced by the task-switch fix; the citation now lists the
+  sharpest terms first, but striking fillers from `STOP_WORDS` is anchoring and needs the harness.

@@ -52,6 +52,20 @@ const MAX_TERMS = 40;
 const MAX_OUTSIDE_SPREAD = 8;
 
 /**
+ * How few places a term must land in to count as pointing at something.
+ *
+ * A word matching three files is telling you where the work is. A word matching
+ * a hundred and thirty-five is telling you it is an English word. The spread
+ * guard above judges a whole prompt; this judges one term, which is the unit
+ * that actually carries the signal.
+ *
+ * Deliberately the same number as MAX_OUTSIDE_SPREAD rather than a second tuned
+ * constant: "few enough places to be a task" is the same question asked of one
+ * word instead of all of them, and two numbers that mean the same thing drift.
+ */
+const FOCUSED_TERM_PLACES = MAX_OUTSIDE_SPREAD;
+
+/**
  * WHY THERE IS NO ADAPTIVE VERSION OF THE LIST ABOVE.
  *
  * A fixed list only knows the words someone thought of. Measured on Infisical
@@ -74,13 +88,20 @@ const MAX_OUTSIDE_SPREAD = 8;
  */
 
 /**
- * How many paths a prompt may name before it looks pasted rather than written.
+ * How many things a prompt may name before it looks pasted rather than written.
  *
- * A developer names one file, occasionally two. A stack trace names ten. That
- * difference is the whole reason a named path is allowed past the spread guard
- * below — "one file named is a statement, ten is a paste".
+ * A developer names one file or one function, occasionally two. A stack trace
+ * names ten. That difference is the whole reason something named outright is
+ * allowed past the spread guard — "one thing named is a statement, ten is a paste".
+ *
+ * Counts PATHS AND IDENTIFIERS TOGETHER. It used to count paths alone, which made
+ * the guard unreachable for a named symbol and, worse, made the override below
+ * unreachable too: `namedPaths.length === 0` sent every identifier-only prompt
+ * into the noise guard, where prose always loses. A backticked function name that
+ * exists in the index is the developer stating where they are working, exactly as
+ * a path is, and is treated the same way now.
  */
-const MAX_NAMED_PATHS = 3;
+const MAX_NAMED_TOKENS = 3;
 
 export interface IndexEntry {
   /** Display name, e.g. `createVendor`, `POST /api/vendors`, `Vendor`. */
@@ -100,6 +121,34 @@ export interface NameIndex {
 export interface BoundaryView {
   names: string[];
   files: string[];
+  /**
+   * What the boundary is ABOUT, as opposed to what it merely reached.
+   *
+   * Anchors and distance-0 members — the places the task text pointed at
+   * directly. Everything else in `files` arrived by walking the call graph.
+   *
+   * The distinction only matters for something the developer NAMED, and there it
+   * matters completely. A boundary drawn from five words of prose can span a
+   * seventh of a repository (462 functions across 130 files was measured), which
+   * sweeps in files that have nothing to do with the job. Treating "we reached
+   * this by traversal" as "the developer is already working here" then made
+   * naming that file a no-op: Ichor answered an explicit *"now work on
+   * packages/i18n/src/index.ts"* with NO_SIGNAL, because a boundary about rate
+   * limiting had incidentally touched it.
+   *
+   * Reaching a file is not the same as the job being about it. Optional so an
+   * older persisted task still classifies rather than crashing — absent means
+   * fall back to `files`, which is the previous behaviour exactly.
+   */
+  coreFiles?: string[];
+  /**
+   * The names the boundary is ABOUT — anchors and distance-0 members.
+   *
+   * Same reasoning as `coreFiles`, for a symbol rather than a path. A helper the
+   * walk reached three hops out is not evidence that the developer naming it is
+   * carrying on with the same job.
+   */
+  coreNames?: string[];
 }
 
 export type PromptVerdict = 'NO_SIGNAL' | 'SAME' | 'WIDENED' | 'NEW';
@@ -181,6 +230,16 @@ function isInside(entry: IndexEntry, boundary: BoundaryView): boolean {
 }
 
 /**
+ * Is the boundary ABOUT this file, rather than merely touching it?
+ *
+ * Used only for things the prompt named outright — see `BoundaryView.coreFiles`.
+ */
+function isCoreFile(file: string, boundary: BoundaryView): boolean {
+  const core = boundary.coreFiles ?? boundary.files;
+  return core.some((f) => f.toLowerCase().endsWith(file));
+}
+
+/**
  * Same job, wider job, different job, or no signal at all.
  *
  * The safe answer is always NO_SIGNAL: it changes nothing. Every ambiguous case
@@ -197,6 +256,16 @@ export function classifyPrompt(
   const insideHits: string[] = [];
   const outsideHits: string[] = [];
   const outsideFiles = new Set<string>();
+  /**
+   * Outside terms precise enough to be pointing at something.
+   *
+   * See `FOCUSED_TERM_PLACES`. Collected separately from `outsideHits` because
+   * the two answer different questions: `outsideHits` is "which words looked
+   * outward", and this is "which of them actually said where".
+   */
+  const focusedOutside: string[] = [];
+  /** Where the focused terms land — the footprint the guard actually judges. */
+  const focusedFiles = new Set<string>();
 
   for (const term of terms) {
     let insideCount = 0;
@@ -228,6 +297,11 @@ export function classifyPrompt(
     }
     if (filesForTerm.length > 0) {
       outsideHits.push(term);
+      const places = new Set(filesForTerm);
+      if (places.size <= FOCUSED_TERM_PLACES) {
+        focusedOutside.push(term);
+        for (const f of places) focusedFiles.add(f);
+      }
       for (const f of filesForTerm) outsideFiles.add(f);
       continue;
     }
@@ -245,8 +319,9 @@ export function classifyPrompt(
 
   for (const p of named.paths) {
     const known = index.entries.some((e) => e.file?.toLowerCase().endsWith(p));
-    const inBoundary = boundary.files.some((f) => f.toLowerCase().endsWith(p));
-    if (inBoundary) continue;
+    // Named outright, so the question is whether the job is ABOUT this file — not
+    // whether the walk happened to pass through it. See BoundaryView.coreFiles.
+    if (isCoreFile(p, boundary)) continue;
     // A path the repo does not have yet is still a statement of intent — `lib/cn.ts`
     // in "extract cn into its own file" names where the developer is going.
     if (known || /\.(tsx?|jsx?|prisma|json|css)$/.test(p)) namedOutside.push(p);
@@ -254,7 +329,9 @@ export function classifyPrompt(
 
   for (const id of named.identifiers) {
     const lower = id.toLowerCase();
-    if (boundary.names.some((n) => n.toLowerCase() === lower)) continue;
+    // As with a named path: reached is not the same as about. See coreNames.
+    const core = boundary.coreNames ?? boundary.names;
+    if (core.some((n) => n.toLowerCase() === lower)) continue;
     // Only if the repo actually has it. An invented name is not evidence.
     if (index.entries.some((e) => e.name.toLowerCase() === lower)) namedOutside.push(id);
   }
@@ -263,39 +340,38 @@ export function classifyPrompt(
   const base = { terms, insideHits, outsideHits, outsideFiles: spread, namedOutside };
 
   /**
-   * A handful of named paths survives the spread guard. A wall of them does not.
+   * A handful of named things survives the spread guard. A wall of them does not.
    *
-   * This distinction was stated in the comment here and then not made in the code:
-   * named paths were simply added to the fuzzy spread, so a prompt naming ONE file
-   * was thrown away because unrelated words in the same sentence happened to match
-   * thousands. On a live session that lost every explicit instruction —
-   * *"in backend/src/.../pki-subscriber-queue.ts set attempts: 3"* was filed as
-   * scattered noise across 6,453 files.
+   * This distinction was stated in the comment here and then made only for PATHS:
+   * `namedPaths` filtered `namedOutside` down to tokens containing a slash or an
+   * extension, and the guard below exempted only those. A named IDENTIFIER —
+   * `pruneMemoryStore`, backticked, present in the index, in exactly the file the
+   * developer meant — went into `namedOutside`, never into `namedPaths`, so the
+   * count was zero, the guard ran, and the function returned NO_SIGNAL before ever
+   * reaching the override twenty lines below that exists to outrank it.
    *
-   * A developer names one file. A stack trace names ten. So the count of named paths
-   * decides which of the two this is, and the fuzzy spread is judged separately.
+   * Measured live on a 1,340-file repository: five consecutive turns classified
+   * NO_SIGNAL, including *"different job now. the rate limiter…"*, after which
+   * Ichor challenged the very work the developer had just asked for. Only a full
+   * repo-relative path could move the boundary. Six phrasings of one intent, one
+   * of which worked.
+   *
+   * A developer names one thing, occasionally two. A stack trace names ten. That
+   * is the distinction the count is for, and it applies to a symbol exactly as it
+   * applies to a path — so `pasted` now counts everything the prompt named.
    */
-  const namedPaths = namedOutside.filter((t) => t.includes('/') || /\.\w+$/.test(t));
-  const pasted = namedPaths.length > MAX_NAMED_PATHS;
-
-  if (pasted || namedPaths.length === 0) {
-    const places = new Set([...spread, ...namedPaths]);
-    if (places.size > MAX_OUTSIDE_SPREAD) {
-      return {
-        ...base,
-        verdict: 'NO_SIGNAL',
-        reason: `outside matches too scattered (${places.size} files) to be a task`,
-      };
-    }
-  }
+  const pasted = namedOutside.length > MAX_NAMED_TOKENS;
 
   /**
    * A path or symbol written out in full decides this on its own.
    *
-   * Ahead of the word counts, because it is a different KIND of evidence: fuzzy
-   * overlap is a guess about what a prompt is about, and `lib/utils.ts` is the
-   * developer stating it. Something named outright and absent from the boundary
-   * means the boundary has to move, whatever the generic words say.
+   * AHEAD OF THE SPREAD GUARD, because it is a different KIND of evidence: fuzzy
+   * overlap is a guess about what a prompt is about, and `lib/utils.ts` — or
+   * `pruneMemoryStore` — is the developer stating it. Ordinary English words in a
+   * large codebase match hundreds of entries (173, 227, 310 and 414 files were all
+   * observed in one session), so a guard sized for noise will always fire on prose.
+   * Letting it fire FIRST meant the strongest signal a prompt can carry was thrown
+   * away by the weakest.
    */
   if (namedOutside.length > 0 && !pasted) {
     const alsoInside = insideHits.length > 0 || boundary.names.length === 0;
@@ -308,6 +384,62 @@ export function classifyPrompt(
     };
   }
 
+  /**
+   * Fuzzy overlap only, now — so the noise guard applies to noise.
+   *
+   * Reached when the prompt named nothing outright, or named so much that it reads
+   * as pasted output rather than as a person pointing at their work. Everything
+   * below this line is a guess assembled from ordinary words.
+   *
+   * THE GUARD JUDGES THE SHARPEST WORD, NOT THE PILE.
+   *
+   * It used to test the UNION of everywhere any outside term landed, which meant
+   * the vaguest word in a sentence decided the fate of the sharpest one. Measured
+   * on the prompt that exposed this — *"different job now. the rate limiter needs
+   * a clearer doc comment on how expired entries are purged."* — the per-term
+   * spread on a 1,340-file repository was:
+   *
+   *     limiter    3 places   <- and the first is the exact file meant
+   *     entries    2
+   *     expired   16
+   *     rate      59
+   *     doc      135
+   *
+   * The union is 174, so the guard fired and the boundary never moved; Ichor then
+   * spent five turns policing the previous task and challenged the work the
+   * developer had just asked for. But `limiter` names three files. The prompt was
+   * never vague — it merely contained vague words, which every sentence does.
+   *
+   * So a prompt is scattered only when NOTHING in it is focused. One term landing
+   * in few places is a pointer, and the generic words beside it are ignored rather
+   * than allowed to outvote it. When nothing is focused, the prompt genuinely says
+   * nowhere, and NO_SIGNAL is still the right answer.
+   */
+  if (pasted) {
+    const places = new Set([...spread, ...namedOutside]);
+    if (places.size > MAX_OUTSIDE_SPREAD) {
+      return {
+        ...base,
+        verdict: 'NO_SIGNAL',
+        reason: `${namedOutside.length} names look pasted, and matches are scattered across ${places.size} files`,
+      };
+    }
+  } else if (outsideHits.length > 0 && focusedFiles.size > MAX_OUTSIDE_SPREAD) {
+    return {
+      ...base,
+      verdict: 'NO_SIGNAL',
+      reason: `outside matches too scattered (${focusedFiles.size} files) to be a task`,
+    };
+  } else if (outsideHits.length > 0 && focusedOutside.length === 0) {
+    return {
+      ...base,
+      verdict: 'NO_SIGNAL',
+      reason:
+        `outside matches too scattered to be a task — every term lands in more than ` +
+        `${FOCUSED_TERM_PLACES} places (${spread.length} files in total)`,
+    };
+  }
+
   if (terms.length === 0) {
     return { ...base, verdict: 'NO_SIGNAL', reason: 'prompt names nothing in the codebase' };
   }
@@ -317,13 +449,17 @@ export function classifyPrompt(
   if (outsideHits.length === 0) {
     return { ...base, verdict: 'SAME', reason: `stays inside the boundary (${insideHits.join(', ')})` };
   }
+  // Cite the FOCUSED terms: those are the ones that decided it, and a log line
+  // naming `doc` when the answer came from `limiter` is a log line that misleads
+  // whoever reads it next.
+  const pointing = (focusedOutside.length ? focusedOutside : outsideHits).slice(0, 4).join(', ');
   if (insideHits.length === 0) {
-    return { ...base, verdict: 'NEW', reason: `points only outside the boundary (${outsideHits.join(', ')})` };
+    return { ...base, verdict: 'NEW', reason: `points only outside the boundary (${pointing})` };
   }
   return {
     ...base,
     verdict: 'WIDENED',
-    reason: `inside (${insideHits.join(', ')}) plus new ground (${outsideHits.join(', ')})`,
+    reason: `inside (${insideHits.slice(0, 4).join(', ')}) plus new ground (${pointing})`,
   };
 }
 

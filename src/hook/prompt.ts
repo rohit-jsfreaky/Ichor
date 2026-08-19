@@ -169,7 +169,19 @@ const PROMPT_SEP = ' | ';
 
 export function widenTask(existing: string, prompt: string): string {
   const said = existing.split(PROMPT_SEP).map((part) => part.trim()).filter(Boolean);
-  const kept = [...said, prompt.trim()].filter(Boolean);
+  /**
+   * The same prompt twice is one prompt.
+   *
+   * A hook can fire again for a turn Ichor already handled — a resumed session, a
+   * host that re-sends, a developer repeating themselves — and appending the text
+   * again does real damage rather than none: every word in it counts twice when
+   * the boundary is drawn, so a repeated sentence quietly outvotes everything
+   * else the task said. Seen in testing as a task reading
+   * `"add a doc comment above getChunkedCookie | add a doc comment above
+   * getChunkedCookie"`, which then appeared verbatim in a challenge.
+   */
+  const fresh = prompt.trim();
+  const kept = (said.some((part) => part === fresh) ? said : [...said, fresh]).filter(Boolean);
   if (!kept.length) return '';
 
   /**
@@ -210,6 +222,22 @@ function boundaryOf(task: PersistedTask): BoundaryView {
       ...task.anchors.map((a) => a.name),
     ],
     files: [...new Set(task.members.map((m) => m.file))],
+    // Distance 0 is where the task text actually pointed; anchors carry their own
+    // file when they have one. Everything else was reached by traversal, and a
+    // file that was merely reached must not silence a developer naming it.
+    coreFiles: [
+      ...new Set([
+        ...task.members.filter((m) => m.distance === 0).map((m) => m.file),
+        ...task.anchors.map((a) => a.file).filter((f): f is string => Boolean(f)),
+      ]),
+    ],
+    coreNames: [
+      ...new Set([
+        ...task.members.filter((m) => m.distance === 0).map((m) => m.name),
+        ...task.coreModels,
+        ...task.anchors.map((a) => a.name),
+      ]),
+    ],
   };
 }
 
@@ -323,8 +351,8 @@ export function scopeBriefing(task: PersistedTask, sessionId?: string): string {
    */
   lines.push(
     files.length > FILES_SHOWN
-      ? 'Any file change outside the job will be questioned — made with an edit tool or a shell command alike — and the list above is partial. Run `ichor check <path>` if you are unsure whether a file is in it.'
-      : 'Any file change outside that list will be questioned, whether it is made with an edit tool or a shell command. If one is genuinely required, run `ichor check <path>` first and explain why.',
+      ? 'Any file change outside the job will be questioned — made with an edit tool or a shell command alike — and the list above is partial. Run `ichor check <path>` if you are unsure whether a file is in it, and `ichor justify <path> "<reason>"` if it is outside but genuinely required.'
+      : 'Any file change outside that list will be questioned, whether it is made with an edit tool or a shell command. Run `ichor check <path>` first if you are unsure, and `ichor justify <path> "<reason>"` to argue that one is genuinely required.',
   );
 
   /**
@@ -380,9 +408,9 @@ export function scopeBriefing(task: PersistedTask, sessionId?: string): string {
  */
 function retrievalOffer(): string {
   return (
-    'Search this repo by structure rather than by guessing at grep patterns — these ' +
-    'read the compiled graph, so they find code whose name you could not have guessed ' +
-    'and skip matches in comments and strings:\n' +
+    'Search this repo by structure rather than by guessing at grep patterns — these read the ' +
+    'compiled graph, so they rank real declarations and skip matches in comments and strings. ' +
+    'They match names rather than meaning, so use the words the code uses:\n' +
     '  ichor find "<what you are looking for, in plain words>"\n' +
     '  ichor impact <symbol>   what breaks if this changes\n' +
     '  ichor paths <Model>     how a table is reached, and through which endpoints\n' +

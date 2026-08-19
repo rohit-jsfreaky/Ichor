@@ -22,6 +22,35 @@ interface NodeError {
   path?: string;
 }
 
+/**
+ * An error Ichor wrote on purpose, for a person to read.
+ *
+ * These already say what happened and what to do about it, so the fallback below
+ * must hand them over untouched. Without the distinction they were printed
+ * correctly and then followed by *"Ichor does not recognise this failure … paste
+ * it into an issue"* — advice to report a bug, appended to a message Ichor had
+ * carefully authored. Seen on a malformed `.claude/settings.json` and on `ichor
+ * check` with no task open: both messages were exactly right, and both were
+ * labelled as unexplained.
+ *
+ * A brand rather than an `instanceof` check, because a subclass does not survive
+ * being thrown across a module boundary in every bundler, and this has to be
+ * reliable in the one place a user is already having a bad time.
+ */
+export class IchorError extends Error {
+  readonly isIchorError = true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'IchorError';
+  }
+}
+
+/** Did Ichor author this message for a reader? */
+function isAuthored(error: unknown): boolean {
+  return Boolean(error) && (error as { isIchorError?: boolean }).isIchorError === true;
+}
+
 /** Everything a thrown value might be, flattened to text we can match on. */
 function textOf(error: unknown): string {
   if (typeof error === 'string') return error;
@@ -44,6 +73,16 @@ const GRAPH_AUTH =
 export function explainFailure(error: unknown): string[] {
   const text = textOf(error);
   const e = error as NodeError;
+
+  /**
+   * Ichor's own message, alone.
+   *
+   * Checked first so nothing below can second-guess a sentence written for this
+   * exact situation — and so no "report a bug" boilerplate lands under it.
+   */
+  if (isAuthored(error)) {
+    return ['', (e.message ?? '').trim(), ''];
+  }
 
   if (GRAPH_UNREACHABLE.test(text)) {
     return [

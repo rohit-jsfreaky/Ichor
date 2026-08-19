@@ -7,7 +7,10 @@ Every number Ichor publishes, the command that produces it, and what it measured
 right and the other one is a bug.
 
 Last full re-measure: **2026-08-18**
-Targets: `papermark` (a real document-sharing product) and `Infisical` (the largest repo tested).
+Partial re-measure after the 19 Aug regression fixes: **2026-08-19** (see the section at the end).
+Targets: `papermark` (a real document-sharing product) and `Infisical` (the largest repo tested),
+plus `better-auth` and `truffle-ai/dexto` — both pnpm monorepos — added 19 Aug because they
+exposed failures the other two could not.
 
 ---
 
@@ -61,7 +64,7 @@ true, one of the numbers is stale.
 
 | Suite | Count | Command | Verified |
 |---|---|---|---|
-| unit | 212 | `npm test` | ✅ 212 passed |
+| unit | 230 | `npm test` | ✅ 230 passed (19 Aug — 212 + 18 for the regression fixes) |
 | classification scenarios | 10 | `npm run check` | ✅ 10/10 |
 | session harness | 12 | `npm run session:test` | ✅ 12 passed, 0 failed |
 | MCP protocol | 20 | `npm run mcp:test` | ⚠️ 20/20 in isolation — see below |
@@ -76,6 +79,16 @@ true, one of the numbers is stale.
 > partial-chunk read in the stdio framing — the code assumes a length header arrives whole, and
 > under load the chunk boundary lands mid-header. **Open bug.** It does not reproduce in
 > isolation, which is exactly why it is written down here.
+
+> **`mcp:test` and `multi:test` also fail on a database holding several projects**, and that is
+> a different thing from the flake above — it is reproducible, and it is the one-database-per-repo
+> limit biting. Measured 19 Aug with **three** projects loaded (demo, better-auth, dexto):
+> `ichor_impact` on the ELEVEN-FILE DEMO took 1,507ms against a 1,500ms budget and fell back to
+> "use your own search tools", so 18/20. `multi:test` did not finish inside 600s. Both are
+> 20/20 and 10/10 again the moment the database holds one project.
+>
+> This corrects a claim in `BUGS.md`: *"Three projects work comfortably."* Three projects is
+> where retrieval on the smallest of them starts breaching its own budget. Two is comfortable.
 
 ## The graph — exact, verified 2026-08-18
 
@@ -208,3 +221,130 @@ npx tsx scripts/ground-truth.ts measure <repo>
 
 Then diff the output against this file, and this file against `README.md`, `web/index.html` and
 `web/docs.html`. Any disagreement is a bug in the prose, not in the table.
+
+---
+
+## 19 Aug — measured on two pnpm monorepos, after the regression fixes
+
+`better-auth` (1,340 files, 3,094 functions) and `truffle-ai/dexto` (1,396 files, 5,777
+functions) were added as targets because each exposed a failure neither papermark nor Infisical
+could. Everything below is exact, produced by calling the package's own `analyzeRepo` and
+`hashId` rather than by a reimplementation.
+
+### Call resolution is repo-shaped, and the published trade is not universal
+
+Command: `npx tsx scripts/analyze.ts <repo>`
+
+| | papermark | **better-auth** |
+|---|---|---|
+| call sites, total | 35,264 | **84,530** |
+| resolved in-repo | 4,164 | 9,143 |
+| external | 4,986 | 23,955 |
+| unresolved | 7,178 | 7,899 |
+| **needing the type checker** | — | **40,903 (48.4%)** |
+| call **edges** written | 21,384 total edges | **4,034 CALLS** |
+
+**The README's "only 2.5% are `obj.method()`" is a papermark figure, not a law.** On better-auth
+it is **48.4%** of call sites, and only **4.8%** of call sites become a CALLS edge. The
+consequence is concrete and worth stating rather than hiding: `ichor impact createAuthEndpoint`
+reports *"called by nothing in the graph"* while the source contains **304 call sites across 10
+packages**. Cross-package imports in a pnpm workspace resolve through `package.json` `exports`
+maps and workspace links, which name-and-import-path resolution cannot follow.
+
+The `2.5% / 96.5% / 1%` split stays published **attributed to papermark**, with the better-auth
+figure beside it. One repository is not a range.
+
+### The data layer is Prisma-client-shaped
+
+better-auth: **12 models, 109 fields, 0 `TOUCHES` edges.**
+
+`TOUCHES` is emitted for direct Prisma client calls (`prisma.vendor.create()`). better-auth
+reaches its data through its own adapter interface, so no function links to a model. Three
+consequences, all measured:
+
+- `ichor paths User` and `ichor paths Session` both answer *"Nothing in the graph touches …"*
+- `coreModels` is empty, so the classifier loses the discriminator it uses at distance > 0
+- **test 2 — the new-flow test — cannot fire at all**
+
+Not a defect in the extractor so much as an unstated scope limit, now stated.
+
+### Declaration merging made a repository un-indexable — fixed
+
+dexto failed at write time, permanently and deterministically:
+
+```
+GraphQuery query is not supported yet:
+conflicting metadata values for vertex 2802411236362412 property line
+```
+
+Cause: `export interface DextoAgentOptions` declared twice in one file (lines 22 and 77 —
+ordinary TypeScript declaration merging). Two `TypeFact`s, one key, different `line`, one
+`UNWIND` batch, whole statement rejected. **Exactly one id of 8,098 collided.**
+
+| | before | after |
+|---|---|---|
+| duplicate node ids on dexto | 1 | **0** |
+| `ichor watch` on dexto | fails at ~23s | **completes in 24.9s** |
+| types extracted | 2,322 | 2,321 (one merge folded) |
+| `delta:test` on dexto | n/a — no graph | **✅ CALLS 6,132 · DECLARES 8,098 · IMPORTS 2,900 · REFERENCES 5,704 · ledger 22,834** |
+
+Prevalence across four repos tested: **1 of 4** (dexto). elysia, opentui and better-auth had zero.
+
+### Task-switch detection from prose — fixed
+
+One intent, six phrasings, from an identical freshly-drawn session-cookie boundary on
+better-auth. Driven through the real compiled hook, not a unit test.
+
+| prompt | before | after |
+|---|---|---|
+| `different job now. the rate limiter needs a clearer doc comment…` | NO_SIGNAL (227 files) | **boundary set, 215 fns** |
+| `now work on the rate limiter` | NO_SIGNAL (67) | **221 fns** |
+| `now work on rateLimiter` | NO_SIGNAL (67) | **221 fns** |
+| ``now work on `pruneMemoryStore` `` | NO_SIGNAL (45) | **211 fns** |
+| `now work on packages/better-auth/src/api/rate-limiter/index.ts` | NEW ✓ | **16 fns** |
+| `switch to rate limiting: fix the purge` | NO_SIGNAL (104) | **88 fns** |
+| **worked** | **1 of 6** | **6 of 6** |
+
+Control: a prompt about the same job (`also update the toast copy when a cookie is rejected`)
+still changes nothing, which is the outcome that matters — the fix must not make the boundary
+skittish.
+
+**Why the union was the wrong thing to measure.** Per-term spread for the first prompt above:
+
+```
+limiter    3 places   <- and the first is the exact file meant
+entries    2
+expired   16
+rate      59
+doc      135
+union    174          <- what the guard used to test
+```
+
+The vaguest word in a sentence was deciding the fate of the sharpest one. The guard now judges
+the footprint of the *focused* terms and ignores the generic ones; when nothing is focused it
+still returns NO_SIGNAL.
+
+### Judge reachability — fixed
+
+`ichor justify <file> "<reason>"` reaches the Judge with no MCP permission. Measured: **29.3s**
+for a live verdict with three structural citations, on a claim the graph can refute.
+
+Before, on an untrusted workspace — the default for a fresh clone — the agent was refused
+`mcp__ichor__ichor_request_scope_expansion` and the entire negotiation layer was unreachable.
+Observed live: five challenges, five silent retries, zero Judge calls.
+
+### Still open, deliberately
+
+Measured and understood, not fixed before submission, because each needs the papermark
+ground-truth harness re-run and that repository is not currently on the machine:
+
+- **`matches()` is substring, not segment-aware.** `ichor find "code that decides how long a
+  login lasts"` returns `LastLoginMethodClientConfig` — it matched *lasts* inside *LastLogin*.
+  The same looseness makes `package.json` CONNECTED for a task naming `packages/…`.
+- **Boundary breadth from short prose.** `ichor start "fix the rate limiter memory store
+  pruning"` drew **462 functions across 130 files — 14.9% of the repo**.
+- **Judge escalation.** A claim about runtime or user behaviour, which its own rules say must go
+  to the developer, was refused with high confidence — twice. The published 3/3 was measured on
+  the demo and may be model-dependent.
+- **Stats after an incremental refresh describe only the delta** — a refreshed `facts.json`
+  reported 139 call sites and 4 unresolved beside 4,034 whole-repo edges.

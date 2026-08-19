@@ -212,6 +212,15 @@ export interface ExtractionStats {
    * rather than inferred from a missing node (rule 2).
    */
   duplicateNames: number;
+  /**
+   * Type declarations merged into one node because TypeScript merges them.
+   *
+   * `interface X {}` twice in a file is ONE type, and emitting two nodes for it
+   * put two rows with the same id and different lines into a single write, which
+   * the engine rejects outright — one merged interface made a whole repository
+   * un-indexable. Reported so a fold is visible rather than inferred.
+   */
+  mergedDeclarations: number;
   /** Wall-clock milliseconds for the whole extraction. */
   durationMs: number;
 }

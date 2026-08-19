@@ -18,6 +18,7 @@ import * as path from 'node:path';
 
 import { COMPOSE_FILE } from '../stack/compose.js';
 import { writeStack } from '../stack/stack.js';
+import { IchorError } from '../errors.js';
 
 /** Matches file-editing tools across both hosts. Codex reports apply_patch. */
 const MATCHER = 'Edit|Write|MultiEdit|apply_patch';
@@ -100,7 +101,7 @@ function readJson(file: string): Record<string, unknown> {
     return JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
   } catch {
     // Never silently discard a config we could not parse.
-    throw new Error(`${file} exists but is not valid JSON — fix or move it, then re-run ichor init`);
+    throw new IchorError(`${file} exists but is not valid JSON — fix or move it, then re-run ichor init`);
   }
 }
 
@@ -229,10 +230,27 @@ function allowMcpTools(
    * config to force it: a tool that grants itself trust in a file the user owns has
    * answered the wrong question.
    */
+  /**
+   * Say what actually breaks, not just that something waits.
+   *
+   * This used to end with *"only this pre-approval waits"*, which reads as a
+   * convenience delay. It is not. Measured in a live session on an untrusted
+   * workspace: the agent was challenged, reached for the scope-expansion tool, and
+   * was refused it — so challenge → argue → Judge, the entire negotiation half of
+   * the product and the only part an API key buys, was unreachable. Its only
+   * remaining move was to write the file again, which it did, five times.
+   *
+   * Hooks and verdicts genuinely do work either way, and that stays said. What was
+   * missing is the cost, and the fact that there is now a way round it.
+   */
   if (!workspaceTrusted(repoRoot)) {
     messages.push('    ⚠ Claude Code ignores this until the workspace is trusted, which is the');
     messages.push('      default for a fresh clone. Run `claude` here once and accept the dialog.');
-    messages.push('      Hooks and verdicts work either way — only this pre-approval waits.');
+    messages.push('      Hooks, boundaries and challenges all work either way. What does NOT work');
+    messages.push('      until then is the agent calling Ichor\'s MCP tools — so it cannot argue');
+    messages.push('      back through MCP, and the Judge is never consulted.');
+    messages.push('      `ichor justify <file> "<reason>"` needs no permission and reaches the');
+    messages.push('      same Judge, which is what the challenge message points the agent at.');
   }
   return true;
 }

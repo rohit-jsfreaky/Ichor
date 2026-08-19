@@ -26,6 +26,7 @@ import { loadTask, toNeighborhood, markJustified, type PersistedTask } from '../
 import { classify, isChallenge } from '../scope/classify.js';
 import { parsePending } from '../scope/pending.js';
 import { askJudge, formatOpinion } from '../judge/judge.js';
+import { packageVersion } from '../version.js';
 import { checkBudget, recordJudgeCall } from '../judge/budget.js';
 
 const PROTOCOL_VERSION = '2025-06-18';
@@ -130,8 +131,8 @@ const TOOLS: ToolDefinition[] = [
       'Where does something live in this codebase? Describe it in plain words — "the place ' +
       'invites are created", "duplicate email handling" — and get the functions, types, routes ' +
       'and tables that match, ranked, with file paths. Use this INSTEAD of grepping for a guessed ' +
-      'name: it searches the compiled structure rather than text, so it finds code whose name you ' +
-      'could not have guessed and skips matches in comments and strings.',
+      'name: it searches the compiled structure rather than text, so it skips matches in comments ' +
+      'and strings. It matches NAMES rather than meaning — use the words your codebase uses.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -225,7 +226,7 @@ export async function runMcpServer(repoRoot: string): Promise<void> {
               {
                 protocolVersion: PROTOCOL_VERSION,
                 capabilities: { tools: {} },
-                serverInfo: { name: 'ichor', version: '0.1.0' },
+                serverInfo: { name: 'ichor', version: packageVersion() },
               },
               request.id,
             ),
@@ -706,7 +707,28 @@ export async function runTool(
           lines.push(`    ${c.via === 'direct' ? '→' : '⇢'} ${c.name.padEnd(24)} ${c.file}`);
         }
       } else {
-        lines.push('', '  called by      nothing in the graph — an entry point, or called dynamically');
+        /**
+         * "Nothing calls this" is the most dangerous sentence Ichor can say.
+         *
+         * It reads as "safe to change", and the old wording — *"an entry point, or
+         * called dynamically"* — offered two explanations that are both about the
+         * CODE, so a reader concludes the code has no callers. Measured on
+         * better-auth: `createAuthEndpoint` produced exactly that line while the
+         * source held **304 call sites across 10 packages**. The cause was neither
+         * of the two offered reasons; it was that cross-package imports resolve
+         * through a `package.json` `exports` map and a workspace link, which
+         * name-and-import-path resolution does not follow.
+         *
+         * So the third possibility is now named, because it is the likeliest one in
+         * any monorepo and it is the only one that means *Ichor cannot see*, rather
+         * than *there is nothing there*.
+         */
+        lines.push('', '  called by      nothing in the graph');
+        lines.push(
+          '                 an entry point, called dynamically, or called from another',
+          '                 package — cross-package imports resolve through package.json',
+          '                 "exports", which Ichor does not follow. Verify before deleting.',
+        );
       }
 
       if (impact.referencedBy.length) {

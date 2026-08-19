@@ -150,8 +150,14 @@ function writeStdoutSync(data: string): void {
   }
 }
 
-/** Turn a verdict into the message the agent reads. */
-export function formatChallenge(verdict: Verdict, task: string): string {
+/**
+ * Turn a verdict into the message the agent reads.
+ *
+ * `file` is taken separately rather than dug out of the verdict text, because the
+ * closing line quotes a runnable command and a command with a placeholder in it is
+ * a command nobody runs.
+ */
+export function formatChallenge(verdict: Verdict, task: string, file = '<file>'): string {
   const lines: string[] = [];
   lines.push(`⚠ Ichor: this looks like scope expansion.`);
   lines.push('');
@@ -170,10 +176,27 @@ export function formatChallenge(verdict: Verdict, task: string): string {
     lines.push(verdict.question);
   }
 
+  /**
+   * Name the mechanism, not the loophole.
+   *
+   * This used to close with *"explain why and proceed — Ichor asks once per file"*,
+   * which describes retrying as an accepted answer while offering no working way to
+   * explain: the MCP tool that took an argument was unreachable on any untrusted
+   * workspace, which is the default for a fresh clone. Measured live — five
+   * challenges, five silent retries, no explanation offered to the developer and no
+   * Judge call. The message was teaching the shortcut.
+   *
+   * `ichor justify` needs no permission and reaches the same Judge, so there is now
+   * something to point at. Retrying still works and is still recorded as forced —
+   * Ichor is not a blocker — but it is no longer the only door, so it stops being
+   * the obvious one.
+   */
   lines.push('');
+  lines.push('If this IS required by the task, say why and have it weighed against the graph:');
+  lines.push(`  ichor justify ${file} "<why the task needs it>"`);
   lines.push(
-    'If this is genuinely required, explain why and proceed — Ichor asks once per file. ' +
-      'If it is not, prefer the smaller change that stays on the existing path.',
+    'A supported reason expands the boundary. If it is not required, prefer the smaller ' +
+      'change that stays on the existing path.',
   );
 
   return lines.join('\n');
@@ -283,7 +306,7 @@ export async function runHook(): Promise<void> {
       for (const line of outcome.log) debug(line);
       if (outcome.challenge) {
         const task = loadTask(repoRoot);
-        postFeedback(formatChallenge(outcome.challenge, task?.task ?? ''));
+        postFeedback(formatChallenge(outcome.challenge, task?.task ?? '', outcome.challengedFile));
       }
       allow();
       return;
@@ -383,7 +406,7 @@ export async function runHook(): Promise<void> {
         markJudged(repoRoot, judged);
         markChallenged(repoRoot, intent.file);
         await client.close();
-        deny(formatChallenge(verdict, task!.task));
+        deny(formatChallenge(verdict, task!.task, intent.file));
         return;
       }
     }

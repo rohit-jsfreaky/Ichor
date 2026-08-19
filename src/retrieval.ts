@@ -32,12 +32,21 @@
  */
 
 import { GraphClient, configFromEnv } from './graph/client.js';
+import { IchorError } from './errors.js';
 import { runTool } from './mcp/server.js';
 import { loadTask } from './state.js';
 import type { PersistedTask } from './state.js';
 
 /** Tools reachable from the shell, and how their words map onto MCP arguments. */
-export type RetrievalCommand = 'find' | 'impact' | 'paths' | 'callers' | 'check' | 'scope' | 'explain';
+export type RetrievalCommand =
+  | 'find'
+  | 'impact'
+  | 'paths'
+  | 'callers'
+  | 'check'
+  | 'scope'
+  | 'explain'
+  | 'justify';
 
 const TOOL_FOR: Record<RetrievalCommand, string> = {
   find: 'ichor_find',
@@ -47,6 +56,28 @@ const TOOL_FOR: Record<RetrievalCommand, string> = {
   check: 'ichor_check_change',
   scope: 'ichor_get_scope',
   explain: 'ichor_explain',
+  /**
+   * Arguing back, from a shell.
+   *
+   * The reason this is here and not only on MCP is a measured failure, not a
+   * convenience. Claude Code discards `permissions.allow` from a project's
+   * settings until the workspace is trusted, and untrusted is the DEFAULT for a
+   * fresh clone — so on a first run the agent is challenged, reaches for
+   * `ichor_request_scope_expansion`, and is told:
+   *
+   *   Claude requested permissions to use mcp__ichor__ichor_request_scope_expansion,
+   *   but you haven't granted it yet.
+   *
+   * Observed live. At that point the whole negotiation half of the product is
+   * unreachable — challenge, argue, Judge, boundary grows — and the only move the
+   * agent has left is to write the file again. Which is exactly what it did, five
+   * times, without ever explaining itself.
+   *
+   * A shell command needs no MCP permission, and the agent is already being told
+   * by its own host to prefer the shell. So the argument goes through the same
+   * door the retrieval tools do: one implementation, reached two ways.
+   */
+  justify: 'ichor_request_scope_expansion',
 };
 
 /**
@@ -74,7 +105,7 @@ export async function retrieve(
   const requireTask = (): PersistedTask => {
     const task = loadTask(repoRoot);
     if (!task) {
-      throw new Error(
+      throw new IchorError(
         'No task is being tracked, so there is no scope to report. ' +
           'Run `ichor watch` and prompt your agent, or `ichor start "<task>"`.',
       );

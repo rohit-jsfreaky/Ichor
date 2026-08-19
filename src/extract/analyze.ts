@@ -71,7 +71,7 @@ export function analyzeRepo(repoRoot: string, options: AnalyzeOptions = {}): Gra
   const types: TypeFact[] = [];
   /** Parent -> nested function edges, merged into `calls` once both ends exist. */
   const containment: CallEdge[] = [];
-  const declarationStats: DeclarationStats = { duplicateNames: 0 };
+  const declarationStats: DeclarationStats = { duplicateNames: 0, mergedDeclarations: 0 };
 
   // Start from the previous run's tables so an incremental parse can resolve
   // names that live in files it is not reading. Freshly parsed files overwrite
@@ -147,18 +147,25 @@ export function analyzeRepo(repoRoot: string, options: AnalyzeOptions = {}): Gra
         }
       }
 
-      for (const declared of declaredTypes(file)) {
+      for (const declared of declaredTypes(file, declarationStats)) {
         const key = nodeKey(repoId, 'type', filePath, declared.name);
         types.push({
           key,
           name: declared.name,
           kind: declared.kind,
           file: filePath,
-          line: declared.node.getStartLineNumber(),
+          // The first declaration is where the type is reported to live.
+          line: declared.nodes[0]!.getStartLineNumber(),
           exported: declared.exported,
         });
         locals.set(declared.name, key);
-        spans.push({ start: declared.node.getStart(), end: declared.node.getEnd(), key });
+        // A span PER DECLARATION, all pointing at the one type. A merged
+        // interface is still two places in the file, and a reference written
+        // inside the second one has to attribute to the same node as the first
+        // — merging must not cost attribution.
+        for (const node of declared.nodes) {
+          spans.push({ start: node.getStart(), end: node.getEnd(), key });
+        }
       }
 
       // Sorted once here so every lookup in the second sweep is a binary search.
@@ -620,6 +627,7 @@ export function analyzeRepo(repoRoot: string, options: AnalyzeOptions = {}): Gra
       typeRefsUnresolved,
       edgesDropped,
       duplicateNames: declarationStats.duplicateNames,
+      mergedDeclarations: declarationStats.mergedDeclarations,
       durationMs: Date.now() - started,
     },
   };
@@ -971,6 +979,14 @@ interface DeclaredFunction {
 export interface DeclarationStats {
   /** Two declarations in one file wanting the same key — e.g. a static and an instance method. */
   duplicateNames: number;
+  /**
+   * Type declarations folded into an existing type of the same name.
+   *
+   * Not a loss like `duplicateNames` — these are declaration merges, and one node
+   * for them is what the language actually means. Counted because a silent fold
+   * and a silent drop look identical from the outside.
+   */
+  mergedDeclarations: number;
 }
 
 /**
@@ -1171,7 +1187,14 @@ function objectLiteralFunctions(object: Node): { name: string; node: Node }[] {
 interface DeclaredType {
   name: string;
   kind: 'interface' | 'alias' | 'enum' | 'class';
-  node: Node;
+  /**
+   * Every declaration that contributes to this type, in source order.
+   *
+   * More than one is the normal case for a merged interface, not an error — see
+   * `declaredTypes`. The first is where the type is reported to live; all of them
+   * are spans a reference can be found inside.
+   */
+  nodes: Node[];
   exported: boolean;
 }
 
@@ -1181,26 +1204,58 @@ interface DeclaredType {
  * Classes appear here as well as contributing their methods to
  * `declaredFunctions` — a class is both a thing you call into and a shape you
  * refer to, and a task can be about either.
+ *
+ * DECLARATION MERGING IS ONE TYPE, NOT TWO.
+ *
+ * TypeScript lets a name be declared more than once in a file and merges the
+ * declarations into a single type — it is how you augment a module, and how a
+ * library extends someone else's interface:
+ *
+ *   export interface Options { llmRegistry?: ModelRegistry }
+ *   export interface Options extends ConfigInput {}          // the same Options
+ *
+ * Emitting one node per DECLARATION produced two nodes with the same id and
+ * different `line`, which HydraDB rejects for the whole batch — one merged
+ * interface anywhere in a repository made that repository impossible to index at
+ * all. Observed on a real 1,396-file project, where exactly one name of 8,098
+ * collided and took the entire graph down with it.
+ *
+ * So declarations are grouped by name, which is also simply what the language
+ * says is true. The first declaration gives the type its location, and `exported`
+ * is true when ANY declaration exports it — `interface X {}` followed by
+ * `export interface X {}` is an exported type.
+ *
+ * The count of merges is reported rather than swallowed (rule 2), because a
+ * number that quietly drops declarations is how a graph starts lying.
  */
-function declaredTypes(file: SourceFile): DeclaredType[] {
-  const found: DeclaredType[] = [];
+function declaredTypes(file: SourceFile, stats: DeclarationStats): DeclaredType[] {
+  const order: string[] = [];
+  const byName = new Map<string, DeclaredType>();
   const exportedNames = exportedByStatement(file);
 
-  for (const node of file.getInterfaces()) {
-    found.push({ name: node.getName(), kind: 'interface', node, exported: isExported(node, exportedNames) });
-  }
-  for (const node of file.getTypeAliases()) {
-    found.push({ name: node.getName(), kind: 'alias', node, exported: isExported(node, exportedNames) });
-  }
-  for (const node of file.getEnums()) {
-    found.push({ name: node.getName(), kind: 'enum', node, exported: isExported(node, exportedNames) });
-  }
+  const add = (name: string, kind: DeclaredType['kind'], node: Node) => {
+    const exported = isExported(node, exportedNames);
+    const existing = byName.get(name);
+    if (existing) {
+      // Same name, same file: one type with several declarations.
+      existing.nodes.push(node);
+      existing.exported = existing.exported || exported;
+      stats.mergedDeclarations++;
+      return;
+    }
+    order.push(name);
+    byName.set(name, { name, kind, nodes: [node], exported });
+  };
+
+  for (const node of file.getInterfaces()) add(node.getName(), 'interface', node);
+  for (const node of file.getTypeAliases()) add(node.getName(), 'alias', node);
+  for (const node of file.getEnums()) add(node.getName(), 'enum', node);
   for (const node of file.getClasses()) {
     const name = node.getName();
-    if (name) found.push({ name, kind: 'class', node, exported: isExported(node, exportedNames) });
+    if (name) add(name, 'class', node);
   }
 
-  return found;
+  return order.map((name) => byName.get(name)!);
 }
 
 /**

@@ -75,7 +75,9 @@ A search tool finds the string `send`. Ichor works out *which* `send`.
 
 `import { send } from './email'` plus that module's export list **is** the answer — so a call becomes an edge to a declaration Ichor can name, followed through re-exports, namespace imports and default exports. Never a same-name coincidence in an unrelated file, and never a hit inside a comment or a string literal.
 
-It deliberately does **not** use TypeScript's type checker to do this, and that was a measurement rather than a shortcut. Asking the checker "which function is this?" costs ~2.45ms per call site, and a real repository has ~16,300 that need resolving — about forty seconds. Of the calls that actually become an edge, **96.5%** are a plain `send(x)`, 1% are `this.foo()`, and only **2.5%** are `obj.method()` on a value whose type only the checker knows. Forty seconds for 2.5% is a bad trade; the other 97.5% needs no inference at all, just bookkeeping.
+It deliberately does **not** use TypeScript's type checker to do this, and that was a measurement rather than a shortcut. Asking the checker "which function is this?" costs ~2.45ms per call site, and papermark has ~16,300 that need resolving — about forty seconds. Of the calls that actually become an edge **there**, 96.5% are a plain `send(x)`, 1% are `this.foo()`, and only 2.5% are `obj.method()` on a value whose type only the checker knows.
+
+**That split is papermark's, and it is not universal — so here is the other end of the range.** On better-auth, a pnpm monorepo, **48.4%** of 84,530 call sites are the form only the checker can resolve, and 4,034 become an edge. The trade is still the right one at forty seconds a build, but a monorepo gets a sparser graph than a single-package app, and the next section is what that costs.
 
 ### And it reports what it could not resolve
 
@@ -157,7 +159,7 @@ The same graph that judges edits will answer questions, so your agent stops gues
 
 | Tool | Answers |
 |---|---|
-| `ichor_find` | Where does X live? Described in plain words — it searches structure, so it finds names you could not have guessed |
+| `ichor_find` | Where does X live? Describe it in plain words — it ranks the repo's own names, types, routes and tables, and skips matches in comments and strings. It matches *names*, not meaning: share the codebase's vocabulary and it finds what grep could not; describe something in words the code never uses and it will say so |
 | `ichor_impact` | What breaks if I change this? Callers, the endpoints that reach it, tables at stake, and every function depending on a type's shape |
 | `ichor_paths` | How does the app reach this table, through which functions? No file search can answer this |
 | `ichor_check_change` | Is this file in the current job, before I edit it? |
@@ -220,7 +222,7 @@ npm run up                    # HydraDB + MinIO via Docker
 npm run smoke                 # round-trips a real write; a listening port is not proof
 npm run build
 
-npm test                      # 198 unit tests
+npm test                      # 230 unit tests
 npm run check                 # 10 classification scenarios, incl. a mid-session job switch
 npm run session:test          # 12 cases a real session hits and nothing else tested
 npm run mcp:test              # 20 MCP protocol checks
@@ -260,9 +262,11 @@ npm run judge:test            # a live Judge, three cases, a few cents
 - **TypeScript and JavaScript only.** Python is next. Nothing else is claimed.
 - **It questions about one edit in eight that you were right to make.** Naming the file in your prompt is what makes the boundary precise — on a real project that was 135 functions of guesswork down to the 9 in the file named.
 - **A shell write is challenged after it lands, not before.** An agent told to edit with `sed` or a heredoc — which is what Claude Code now instructs in auto mode — fires no `PreToolUse` hook, so Ichor reads what actually changed on disk once the command finishes and challenges then. The bytes are written by the time the question is asked; what is preserved is that nothing has been built on top of them yet. A write from your own editor, or from a process Ichor never sees run, is still only named at the end of the turn.
+- **It understands one database library, called one way.** `TOUCHES` — the edges behind test 2, `ichor paths`, and "the data this task is about" — comes from direct Prisma client calls (`prisma.vendor.create()`). A codebase that reaches its data through its own adapter, a repository layer, a query builder or raw SQL gets **zero** of them: measured on better-auth, 12 models, 109 fields, 0 edges. You still get the whole connectivity half of the product, and `ichor paths` will tell you it has nothing rather than guess. Other ORMs are the next thing after Python.
+- **In a monorepo, cross-package calls are missed.** An import of `your-pkg/api` resolves through a `package.json` `exports` map and a workspace link, which name-and-import-path resolution does not follow. On better-auth this is not a rounding error: `ichor impact createAuthEndpoint` reports *"called by nothing in the graph"* where the source has **304 call sites across 10 packages**. Within a package it is accurate. Treat a monorepo answer as a floor, and note that the message hedges but does not currently say *"and I cannot see other packages"* — it should.
 - **Ichor can be wrong.** The boundary is an expectation, not a fact, and it is designed to grow when the work justifies it. When it cannot verify a justification it asks you rather than deciding.
 
-Static-analysis blind spots, memory ceilings, one-database-per-repo and the rest are in [`web/docs.html`](web/docs.html).
+Static-analysis blind spots, memory ceilings, one-database-per-repo and the rest are in [`web/docs.html`](web/docs.html). Everything found by testing the published package against real repositories on 19 Aug — sixteen findings, what was fixed and what was not — is in [`REGRESSION-2026-08-19.md`](REGRESSION-2026-08-19.md).
 
 ---
 

@@ -223,6 +223,8 @@ export interface GateOutcome {
   log: string[];
   /** Present only when something out of scope was found. */
   challenge?: Verdict;
+  /** Which file the challenge is about, so the message can quote a runnable command. */
+  challengedFile?: string;
 }
 
 /**
@@ -354,7 +356,7 @@ export async function judgeBashChanges(repoRoot: string): Promise<GateOutcome> {
         gate.lastCheckAt = Date.now();
         saveGateState(repoRoot, gate);
         log.push(`post: challenged ${change.file} (${Date.now() - started}ms)`);
-        return { log, challenge: verdict };
+        return { log, challenge: verdict, challengedFile: change.file };
       }
     }
 

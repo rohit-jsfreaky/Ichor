@@ -16,7 +16,6 @@
 import { Command } from 'commander';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { GraphClient, configFromEnv } from './graph/client.js';
 import { explainFailure } from './errors.js';
@@ -37,27 +36,8 @@ import {
   writeStoredKey,
 } from './judge/credentials.js';
 import { installHooks } from './hook/install.js';
+import { packageVersion } from './version.js';
 import { up, down, isRunning } from './stack/stack.js';
-
-/**
- * The version, read from package.json rather than written here twice.
- *
- * It was a literal, and it drifted: package.json said 0.1.1 while `ichor
- * --version` said 0.1.0, so the one number a user can check to tell whether
- * their install has a fix was reporting the version before it. Resolved
- * relative to this file, which lands on the package root both from `dist/src/`
- * in a checkout and from `node_modules/ichor-cli/dist/src/` once installed.
- */
-function packageVersion(): string {
-  try {
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    const pkg = JSON.parse(fs.readFileSync(path.resolve(here, '..', '..', 'package.json'), 'utf8'));
-    return typeof pkg.version === 'string' ? pkg.version : '0.0.0';
-  } catch {
-    // Never let a missing manifest stop the CLI from running.
-    return '0.0.0';
-  }
-}
 
 const program = new Command();
 
@@ -462,6 +442,29 @@ program
   .option('--repo <path>', 'repository root', process.cwd())
   .action(async (file: string, options: { repo: string }) => {
     await runRetrieval('check', { file }, options);
+  });
+
+/**
+ * Answer a challenge, rather than retry past it.
+ *
+ * Ichor questioning an edit is only half a conversation; this is the other half,
+ * and until now it existed only as an MCP tool. That turned out to mean it did not
+ * exist at all on a fresh clone: Claude Code ignores a project's
+ * `permissions.allow` until the workspace is trusted, so the agent was challenged,
+ * tried to argue, and was refused the tool. The one feature an API key buys could
+ * never be reached.
+ *
+ * A shell command has no such gate. Same function, same budget, same Judge — see
+ * src/retrieval.ts.
+ */
+program
+  .command('justify')
+  .description('argue that a file outside the task is genuinely required, and have it weighed')
+  .argument('<file>', 'path relative to the repository root')
+  .argument('<reason...>', 'why this change is required BY THE TASK')
+  .option('--repo <path>', 'repository root', process.cwd())
+  .action(async (file: string, reason: string[], options: { repo: string }) => {
+    await runRetrieval('justify', { file, reason: reason.join(' ') }, options);
   });
 
 program

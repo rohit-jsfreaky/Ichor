@@ -49,6 +49,13 @@ export interface WriteStats {
   edges: EdgeLedger;
   /** Edges that are gone from the code but could not be removed. Reported, not hidden. */
   staleEdgesLeft: number;
+  /**
+   * Node rows dropped for sharing an id with an earlier row in the same write.
+   *
+   * Should always be zero. Non-zero means extraction produced two nodes for one
+   * thing, which the engine would otherwise reject the whole statement over.
+   */
+  duplicateRowsDropped: number;
   durationMs: number;
 }
 
@@ -98,6 +105,7 @@ export async function writeGraph(
   const repo = repoIdFor(facts.repoRoot);
 
   let nodesWritten = 0;
+  let duplicateRowsDropped = 0;
   let edgesWritten = 0;
   let statements = 0;
   let edges: EdgeLedger = {};
@@ -149,6 +157,54 @@ export async function writeGraph(
     );
   };
 
+  /**
+   * Two rows for one node id, in one statement, kills the whole write.
+   *
+   * HydraDB answers a batch containing the same vertex twice with different
+   * property values by rejecting the ENTIRE statement:
+   *
+   *   conflicting metadata values for vertex 2802411236362412 property line
+   *
+   * Not the row — the statement, and with it the build. A single duplicate key
+   * anywhere in a repository therefore made that repository impossible to index,
+   * with an error naming a number and nothing a reader could act on. That is what
+   * happened to a real 1,396-file project: one merged interface out of 8,098
+   * distinct ids, and no graph at all.
+   *
+   * The extractor is where that particular duplicate was fixed. This is here
+   * because the extractor is not the only thing that could ever produce one, and
+   * the cost of being wrong is catastrophically out of proportion to the cause.
+   * The first row wins, the rest are counted and named (rule 2) — so an unknown
+   * future duplicate costs one reported line instead of the whole product.
+   */
+  const dedupeByVertex = (
+    rows: Record<string, unknown>[],
+    label: string,
+  ): Record<string, unknown>[] => {
+    const seen = new Set<string>();
+    const kept: Record<string, unknown>[] = [];
+    let dropped = 0;
+
+    for (const row of rows) {
+      const id = String(row.vertex);
+      if (seen.has(id)) {
+        dropped++;
+        continue;
+      }
+      seen.add(id);
+      kept.push(row);
+    }
+
+    if (dropped > 0) {
+      duplicateRowsDropped += dropped;
+      progress(
+        `⚠ ${dropped} duplicate ${label} row${dropped === 1 ? '' : 's'} share a node id with an ` +
+          `earlier row — kept the first of each. This is a bug in extraction, not in your code.`,
+      );
+    }
+    return kept;
+  };
+
   /** Say what was skipped, so a fast build is never mistaken for a broken one. */
   const nodePhase = async <T extends { key: string }>(
     label: string,
@@ -163,8 +219,9 @@ export async function writeGraph(
         ? `writing ${current.length} ${label}`
         : `writing ${todo.length} changed ${label} (${current.length - todo.length} unchanged, skipped)`,
     );
-    await runBatched(rows(todo), cypher);
-    nodesWritten += todo.length;
+    const batch = dedupeByVertex(rows(todo), label);
+    await runBatched(batch, cypher);
+    nodesWritten += batch.length;
   };
 
 
@@ -469,6 +526,7 @@ export async function writeGraph(
 
   return {
     nodesWritten,
+    duplicateRowsDropped,
     edgesWritten,
     statements,
     nodesPruned: pruned.removed,

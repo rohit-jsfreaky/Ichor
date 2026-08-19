@@ -433,3 +433,74 @@ describe('a named file survives a noisy sentence (bug 12)', () => {
     expect(result.verdict).not.toBe('NO_SIGNAL');
   });
 });
+
+/**
+ * A named symbol is evidence, and it must outrank noise.
+ *
+ * These exist because of a live failure on a 1,340-file repository. The spread
+ * guard — which is there to stop a boundary moving on scattered word matches —
+ * ran BEFORE the named-outright override and exempted only paths. So a prompt
+ * naming a real function was thrown away by the generic words sitting next to it,
+ * and Ichor spent five consecutive turns policing a task the developer had
+ * already moved on from, challenging the very work they had just asked for.
+ *
+ * Six phrasings of one intent were tried live. Exactly one — the full
+ * repo-relative path — moved the boundary.
+ */
+describe('a named symbol outranks scattered words', () => {
+  /** Enough generic words to trip the spread guard on their own. */
+  const noisy = 'widget alpha bravo charlie delta echo foxtrot golf hotel india juliet';
+
+  it('moves the boundary when the prompt names a function that exists', () => {
+    const verdict = classifyPrompt(
+      `different job now, work on \`createInvoice\` ${noisy}`,
+      index,
+      vendorBoundary,
+    );
+    expect(verdict.verdict).not.toBe('NO_SIGNAL');
+    expect(verdict.namedOutside).toContain('createInvoice');
+  });
+
+  it('would have said NO_SIGNAL on those words alone', () => {
+    // Proves the words really are scattered enough to trip the guard, so the
+    // test above is measuring the override and not a quiet prompt.
+    const verdict = classifyPrompt(noisy, index, vendorBoundary);
+    expect(verdict.verdict).toBe('NO_SIGNAL');
+  });
+
+  it('still moves the boundary for a named path, as it always did', () => {
+    const verdict = classifyPrompt(
+      `now work on src/lib/billing/invoice.ts ${noisy}`,
+      index,
+      vendorBoundary,
+    );
+    expect(verdict.verdict).not.toBe('NO_SIGNAL');
+  });
+
+  it('does not invent a switch from a name the repo does not have', () => {
+    const verdict = classifyPrompt(
+      `now work on \`totallyMadeUpSymbol\` ${noisy}`,
+      index,
+      vendorBoundary,
+    );
+    expect(verdict.verdict).toBe('NO_SIGNAL');
+  });
+
+  it('treats a wall of names as pasted output, not as a statement', () => {
+    // A stack trace names many things. The guard exists for exactly this, and it
+    // must still apply now that identifiers count towards it.
+    const verdict = classifyPrompt(
+      'createInvoice markInvoicePaid listUnpaidInvoices requireSession `alphaWidget` ' +
+        '`bravoWidget` `charlieWidget` ' + noisy,
+      index,
+      vendorBoundary,
+    );
+    expect(verdict.verdict).toBe('NO_SIGNAL');
+    expect(verdict.reason).toMatch(/pasted/);
+  });
+
+  it('a symbol already inside the boundary is not a switch', () => {
+    const verdict = classifyPrompt('keep going on `createVendor`', index, vendorBoundary);
+    expect(verdict.verdict).not.toBe('NEW');
+  });
+});
